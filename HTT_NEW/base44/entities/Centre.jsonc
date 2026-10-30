@@ -1,0 +1,135 @@
+{
+  "name": "Centre",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "code": {
+      "type": "string"
+    },
+    "area": {
+      "type": "string"
+    },
+    "address": {
+      "type": "string"
+    },
+    "map_link": {
+      "type": "string"
+    },
+    "lead_coach": {
+      "type": "string"
+    },
+    "staff_emails": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "programme_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "age_groups": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "schedule": {
+      "type": "string"
+    },
+    "approved_fee": {
+      "type": "number"
+    },
+    "capacity": {
+      "type": "number"
+    },
+    "contact_name": {
+      "type": "string"
+    },
+    "contact_phone": {
+      "type": "string"
+    },
+    "contact_email": {
+      "type": "string"
+    },
+    "operational_notes": {
+      "type": "string"
+    },
+    "registration_available": {
+      "type": "boolean",
+      "default": false
+    },
+    "review_status": {
+      "type": "string",
+      "enum": [
+        "pending_verification",
+        "approved"
+      ],
+      "default": "pending_verification"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending_verification",
+        "open_for_registration",
+        "assessments_open",
+        "coming_soon",
+        "temporarily_unavailable"
+      ],
+      "default": "pending_verification"
+    },
+    "proposed_area": {
+      "type": "boolean",
+      "default": true
+    }
+  },
+  "required": [
+    "name",
+    "code"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "ceo"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "operations"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "finance"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "coach"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "marketing"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "sponsorship"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "name": "AttendanceSession",
+  "type": "object",
+  "properties": {
+    "centre_id": {
+      "type": "string"
+    },
+    "centre_name": {
+      "type": "string"
+    },
+    "programme_id": {
+      "type": "string"
+    },
+    "programme_name": {
+      "type": "string"
+    },
+    "session_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "coach_email": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "scheduled",
+        "completed",
+        "cancelled"
+      ],
+      "default": "scheduled"
+    },
+    "present_count": {
+      "type": "number",
+      "default": 0
+    },
+    "absent_count": {
+      "type": "number",
+      "default": 0
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "session_date"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "ceo"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "operations"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "coach"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "name": "GuardianLink",
+  "type": "object",
+  "properties": {
+    "guardian_id": {
+      "type": "string"
+    },
+    "guardian_name": {
+      "type": "string"
+    },
+    "player_id": {
+      "type": "string"
+    },
+    "player_name": {
+      "type": "string"
+    },
+    "relationship": {
+      "type": "string",
+      "enum": [
+        "mother",
+        "father",
+        "guardian",
+        "other"
+      ]
+    },
+    "is_primary": {
+      "type": "boolean",
+      "default": false
+    },
+    "is_emergency_contact": {
+      "type": "boolean",
+      "default": false
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "guardian_id",
+    "player_id"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "ceo"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "operations"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "finance"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "coach"
+          }
+        }
+      ]
+    }
+  }
+}

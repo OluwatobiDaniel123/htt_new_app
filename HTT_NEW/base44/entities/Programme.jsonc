@@ -1,0 +1,113 @@
+{
+  "name": "Programme",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "code": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "age_group_label": {
+      "type": "string"
+    },
+    "age_min": {
+      "type": "number"
+    },
+    "age_max": {
+      "type": "number"
+    },
+    "approved_fee": {
+      "type": "number"
+    },
+    "currency": {
+      "type": "string",
+      "default": "NGN"
+    },
+    "schedule": {
+      "type": "string"
+    },
+    "capacity": {
+      "type": "number"
+    },
+    "centre_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "assessments_required": {
+      "type": "boolean",
+      "default": true
+    },
+    "availability": {
+      "type": "string",
+      "enum": [
+        "open",
+        "waitlist",
+        "closed"
+      ],
+      "default": "open"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "planned",
+        "archived"
+      ],
+      "default": "active"
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "age_group_label"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "ceo"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "operations"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "finance"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "coach"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "marketing"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "sponsorship"
+          }
+        }
+      ]
+    }
+  }
+}

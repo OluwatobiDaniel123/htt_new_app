@@ -1,0 +1,112 @@
+{
+  "name": "ScholarshipAward",
+  "type": "object",
+  "properties": {
+    "application_id": {
+      "type": "string"
+    },
+    "player_id": {
+      "type": "string"
+    },
+    "player_name": {
+      "type": "string"
+    },
+    "programme_id": {
+      "type": "string"
+    },
+    "programme_name": {
+      "type": "string"
+    },
+    "centre_id": {
+      "type": "string"
+    },
+    "centre_name": {
+      "type": "string"
+    },
+    "award_amount": {
+      "type": "number"
+    },
+    "benefit_description": {
+      "type": "string"
+    },
+    "funding_secured": {
+      "type": "number",
+      "default": 0
+    },
+    "funding_required": {
+      "type": "number",
+      "default": 0
+    },
+    "start_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "end_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "renewal_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "paused",
+        "completed",
+        "withdrawn"
+      ],
+      "default": "active"
+    },
+    "sponsor_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "player_name",
+    "award_amount"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "ceo"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "operations"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "finance"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "coach"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "sponsorship"
+          }
+        }
+      ]
+    }
+  }
+}

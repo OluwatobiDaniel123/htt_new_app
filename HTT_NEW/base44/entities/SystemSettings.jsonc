@@ -1,0 +1,156 @@
+{
+  "name": "SystemSettings",
+  "type": "object",
+  "properties": {
+    "academy_name": {
+      "type": "string",
+      "default": "HTT Academy Nigeria"
+    },
+    "contact_email": {
+      "type": "string"
+    },
+    "contact_phone": {
+      "type": "string"
+    },
+    "currency": {
+      "type": "string",
+      "default": "NGN"
+    },
+    "registration_prefix": {
+      "type": "string",
+      "default": "HTT-REG"
+    },
+    "player_id_prefix": {
+      "type": "string",
+      "default": "HTT-P"
+    },
+    "retention_years": {
+      "type": "number",
+      "default": 7
+    },
+    "payment_provider": {
+      "type": "string",
+      "default": "paystack"
+    },
+    "paystack_configured": {
+      "type": "boolean",
+      "default": false
+    },
+    "league_status": {
+      "type": "string",
+      "enum": [
+        "planned",
+        "in_preparation",
+        "active"
+      ],
+      "default": "planned"
+    },
+    "school_project_status": {
+      "type": "string",
+      "enum": [
+        "proposed",
+        "planned",
+        "confirmed"
+      ],
+      "default": "proposed"
+    },
+    "scholarship_target": {
+      "type": "number",
+      "default": 20
+    },
+    "assessment_criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "max": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "role_permissions": {
+      "type": "object"
+    }
+  },
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "ceo"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "operations"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "finance"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "coach"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "marketing"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "sponsorship"
+          }
+        }
+      ]
+    },
+    "create": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "ceo"
+          }
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "ceo"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}
