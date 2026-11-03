@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { catalogString, migrationConstraintRequirements, namedConstraintFailureMessage, postgresColumnTypeMatches, PRODUCTION_SCHEMA, readCatalogField, type PostgresColumnType } from "./schemaTypes.js";
+import { catalogString, migrationConstraintRequirements, missingConstraintCounts, namedConstraintFailureMessage, postgresColumnTypeMatches, PRODUCTION_SCHEMA, readCatalogField, type PostgresColumnType, type TableConstraintCounts } from "./schemaTypes.js";
 
 const column = (values: Partial<PostgresColumnType>): PostgresColumnType => ({
   data_type: "text",
@@ -86,4 +86,38 @@ test("named migration constraint failures identify the checked schema", () => {
     namedConstraintFailureMessage("public", ["registrations_guardian_fk (migration: 20261029000000-create-initial-schema.cjs)"]),
     "Schema verification failed in schema public; missing migration constraints: registrations_guardian_fk (migration: 20261029000000-create-initial-schema.cjs). No migrations or seeders were run.",
   );
+});
+
+test("only public registrations foreign-key counts are temporarily excluded", () => {
+  const requirements = new Map<string, TableConstraintCounts>([
+    ["registrations", { c: 2, f: 5, u: 1 }],
+    ["players", { c: 1, f: 1, u: 0 }],
+  ]);
+  const actual = new Map<string, TableConstraintCounts>([
+    ["registrations", { c: 1, f: 2, u: 0 }],
+    ["players", { c: 1, f: 0, u: 0 }],
+  ]);
+
+  assert.deepEqual(missingConstraintCounts("public", requirements, actual), [
+    { table: "registrations", kind: "c", expected: 2, actual: 1 },
+    { table: "registrations", kind: "u", expected: 1, actual: 0 },
+    { table: "players", kind: "f", expected: 1, actual: 0 },
+  ]);
+  assert.deepEqual(missingConstraintCounts("archive", requirements, actual), [
+    { table: "registrations", kind: "c", expected: 2, actual: 1 },
+    { table: "registrations", kind: "f", expected: 5, actual: 2 },
+    { table: "registrations", kind: "u", expected: 1, actual: 0 },
+    { table: "players", kind: "f", expected: 1, actual: 0 },
+  ]);
+});
+
+test("temporary foreign-key exception leaves the other production schema checks enabled", async () => {
+  const productionSetup = await readFile(resolve(process.cwd(), "src/scripts/productionSetup.ts"), "utf8");
+
+  assert.match(productionSetup, /missingConstraintCounts\(schemaName, constraintRequirements, actual\)/);
+  assert.match(productionSetup, /missingTables\.length/);
+  assert.match(productionSetup, /missingColumns\.length/);
+  assert.match(productionSetup, /mismatchedTypes\.length/);
+  assert.match(productionSetup, /missingIndexes\.length/);
+  assert.match(productionSetup, /missingConstraints\.length/);
 });

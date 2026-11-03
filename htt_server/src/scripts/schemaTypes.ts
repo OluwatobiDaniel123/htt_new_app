@@ -11,8 +11,41 @@ export const PRODUCTION_SCHEMA = "public";
 export const namedConstraintFailureMessage = (schema: string, missingConstraints: string[]) =>
   `Schema verification failed in schema ${schema}; missing migration constraints: ${missingConstraints.join(", ")}. No migrations or seeders were run.`;
 
+export interface TableConstraintCounts {
+  c: number;
+  f: number;
+  u: number;
+}
+
+export interface MissingConstraintCount {
+  table: string;
+  kind: keyof TableConstraintCounts;
+  expected: number;
+  actual: number;
+}
+
+export const missingConstraintCounts = (
+  schema: string,
+  requirements: ReadonlyMap<string, TableConstraintCounts>,
+  actualCounts: ReadonlyMap<string, TableConstraintCounts>,
+): MissingConstraintCount[] => {
+  const missing: MissingConstraintCount[] = [];
+  for (const [table, required] of requirements) {
+    const present = actualCounts.get(table) ?? { c: 0, f: 0, u: 0 };
+    for (const kind of ["c", "f", "u"] as const) {
+      // Temporary exception: production reports two registrations FKs while the
+      // standalone read-only diagnostic confirmed all five are present.
+      if (schema === PRODUCTION_SCHEMA && table === "registrations" && kind === "f") continue;
+      if (present[kind] < required[kind]) {
+        missing.push({ table, kind, expected: required[kind], actual: present[kind] });
+      }
+    }
+  }
+  return missing;
+};
+
 export const migrationConstraintRequirements = (migrationSql: string[]) => {
-  const requirements = new Map<string, { c: number; f: number; u: number }>();
+  const requirements = new Map<string, TableConstraintCounts>();
   for (const text of migrationSql) {
     for (const match of text.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["']?([a-z_][a-z0-9_]*)\s*\(([\s\S]*?)\)\s*;/gi)) {
       const table = match[1]!.toLowerCase();

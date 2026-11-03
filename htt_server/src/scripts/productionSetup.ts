@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { QueryTypes } from "sequelize";
-import { catalogString, migrationConstraintRequirements, namedConstraintFailureMessage, postgresColumnTypeMatches, PRODUCTION_SCHEMA, readCatalogField, type PostgresColumnType } from "./schemaTypes.js";
+import { catalogString, migrationConstraintRequirements, missingConstraintCounts, namedConstraintFailureMessage, postgresColumnTypeMatches, PRODUCTION_SCHEMA, readCatalogField, type PostgresColumnType } from "./schemaTypes.js";
 import { env } from "../config/env.js";
 import { sequelize, models, coachingApprenticeApplication } from "../models/index.js";
 import { seedAdminAccount } from "../services/adminSeedService.js";
@@ -223,17 +223,9 @@ const verifySchema = async (migrationNames: string[]) => {
       counts[row.contype as "c" | "f" | "u"] = row.count;
       actual.set(table, counts);
     }
-    const missing: string[] = [];
     const kindLabels = { c: "check constraints", f: "foreign keys", u: "unique constraints" };
-    for (const [table, required] of constraintRequirements) {
-      const present = actual.get(table) ?? { c: 0, f: 0, u: 0 };
-      for (const kind of ["c", "f", "u"] as const) {
-        if (present[kind] < required[kind]) {
-          missing.push(`${schemaName}.${table} (${kindLabels[kind]} expected ${required[kind]}, found ${present[kind]})`);
-        }
-      }
-    }
-    if (missing.length) fail(`Schema verification failed in schema ${schemaName}; migration table constraints are missing: ${missing.map((item) => `${item} (migration: ${migrationOrigin(migrationNames, sql, item.split(" ")[0]!.split(".").at(-1)!.toLowerCase())})`).join(", ")}. No migrations or seeders were run.`);
+    const missing = missingConstraintCounts(schemaName, constraintRequirements, actual);
+    if (missing.length) fail(`Schema verification failed in schema ${schemaName}; migration table constraints are missing: ${missing.map(({ table, kind, expected, actual: present }) => `${schemaName}.${table} (${kindLabels[kind]} expected ${expected}, found ${present}) (migration: ${migrationOrigin(migrationNames, sql, table)})`).join(", ")}. No migrations or seeders were run.`);
   }
 };
 
