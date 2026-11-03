@@ -1,8 +1,22 @@
 import { DataTypes, type Sequelize } from "sequelize";
+import type { Model } from "sequelize";
 import { defineModel, optionalUuid, timestamp } from "./defineModel.js";
 
+export interface EnquiryAttributes {
+  id: string; contactName: string; email: string | null; phone: string | null; type: string; source: string | null;
+  status: string; assignedToId: string | null; priority: string | null; subject: string | null; message: string | null;
+  notes: string | null; nextFollowUp: Date | null; consentToContact: boolean | null; optedOut: boolean | null;
+}
+export type EnquiryInstance = Model<EnquiryAttributes, Partial<EnquiryAttributes>>;
+export interface SponsorshipEnquiryAttributes {
+  id: string; contactName: string; organisation: string | null; email: string | null; phone: string | null;
+  category: string; proposedAmount: string | number | null; status: string; priority: string | null; notes: string | null;
+  source: string | null; assignedToId: string | null;
+}
+export type SponsorshipEnquiryInstance = Model<SponsorshipEnquiryAttributes, Partial<SponsorshipEnquiryAttributes>>;
+
 export const defineCommunicationModels = (sequelize: Sequelize) => ({
-  Enquiry: defineModel(sequelize, "Enquiry", "enquiries", {
+  Enquiry: defineModel<EnquiryAttributes>(sequelize, "Enquiry", "enquiries", {
     contactName: {
       type: DataTypes.STRING(200),
       allowNull: false,
@@ -74,7 +88,7 @@ export const defineCommunicationModels = (sequelize: Sequelize) => ({
     notes: DataTypes.TEXT,
     completedAt: { type: DataTypes.DATE, field: "completed_at" },
   }),
-  SponsorshipEnquiry: defineModel(
+  SponsorshipEnquiry: defineModel<SponsorshipEnquiryAttributes>(
     sequelize,
     "SponsorshipEnquiry",
     "sponsorship_enquiries",

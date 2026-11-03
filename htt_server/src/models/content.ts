@@ -1,5 +1,13 @@
 import { DataTypes, type Sequelize } from "sequelize";
+import type { Model } from "sequelize";
 import { defineModel, optionalUuid } from "./defineModel.js";
+
+export interface StoryAttributes {
+  id: string; title: string; category: string; description: string | null; centreId: string | null;
+  publicationDate: string | null; authorId: string | null; status: string; involvesChildren: boolean;
+  safeguardingApproved: boolean; safeguardingNotes: string | null; centre?: { name: string } | null;
+}
+export type StoryInstance = Model<StoryAttributes, Partial<StoryAttributes>>;
 
 export const defineContentModels = (sequelize: Sequelize) => ({
   MediaAsset: defineModel(sequelize, "MediaAsset", "media_assets", {
@@ -32,7 +40,7 @@ export const defineContentModels = (sequelize: Sequelize) => ({
     },
     metadata: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
   }),
-  Story: defineModel(sequelize, "Story", "stories", {
+  Story: defineModel<StoryAttributes>(sequelize, "Story", "stories", {
     title: { type: DataTypes.STRING(220), allowNull: false },
     category: { type: DataTypes.STRING(50), allowNull: false },
     description: DataTypes.TEXT,

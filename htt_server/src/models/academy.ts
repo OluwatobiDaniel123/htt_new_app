@@ -1,4 +1,5 @@
 import { DataTypes, type Sequelize } from "sequelize";
+import type { Model } from "sequelize";
 import {
   defineModel,
   date,
@@ -8,8 +9,28 @@ import {
   timestamp,
 } from "./defineModel.js";
 
+export interface CentreAttributes {
+  id: string; slug: string | null; name: string; code: string | null; area: string | null;
+  address: string | null; city: string | null; region: string | null; mapEmbed: string | null;
+  mapLink: string | null; leadCoach: string | null; staffEmails: string[]; ageGroups: string[];
+  schedule: string | null; image: string | null; comingSoon: boolean; approvedFee: string | null;
+  capacity: number | null; contactName: string | null; contactPhone: string | null; contactEmail: string | null;
+  operationalNotes: string | null; registrationAvailable: boolean; reviewStatus: string | null;
+  status: string; proposedArea: boolean;
+}
+export type CentreInstance = Model<CentreAttributes, Partial<CentreAttributes>>;
+export interface ProgrammeAttributes {
+  id: string; slug: string | null; name: string; tagline: string | null; code: string | null;
+  description: string | null; ageGroup: string | null; trainingDays: string[]; duration: string | null;
+  price: string | null; benefits: string[]; requirements: string[]; equipment: string[]; icon: string | null;
+  featured: boolean; ageGroupLabel: string | null; ageMin: number | null; ageMax: number | null;
+  approvedFee: string | null; currency: string; schedule: string | null; capacity: number | null;
+  assessmentsRequired: boolean; availability: string | null; status: string; notes: string | null;
+}
+export type ProgrammeInstance = Model<ProgrammeAttributes, Partial<ProgrammeAttributes>>;
+
 export const defineAcademyModels = (sequelize: Sequelize) => ({
-  Centre: defineModel(sequelize, "Centre", "centres", {
+  Centre: defineModel<CentreAttributes>(sequelize, "Centre", "centres", {
     slug: string(180),
     name: { type: DataTypes.STRING(180), allowNull: false },
     code: string(40),
@@ -59,7 +80,7 @@ export const defineAcademyModels = (sequelize: Sequelize) => ({
       field: "proposed_area",
     },
   }),
-  Programme: defineModel(sequelize, "Programme", "programmes", {
+  Programme: defineModel<ProgrammeAttributes>(sequelize, "Programme", "programmes", {
     slug: string(180),
     name: { type: DataTypes.STRING(180), allowNull: false },
     tagline: text(),

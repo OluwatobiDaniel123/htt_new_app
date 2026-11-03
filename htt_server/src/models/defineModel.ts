@@ -7,17 +7,31 @@ import {
   type Sequelize,
 } from "sequelize";
 
-export const defineModel = (
+export function defineModel(
   sequelize: Sequelize,
   modelName: string,
   tableName: string,
   fields: ModelAttributes<Model, Record<string, unknown>>,
-  options: Omit<
-    ModelOptions,
-    "sequelize" | "tableName" | "timestamps" | "underscored"
-  > = {},
-): ModelStatic<Model> =>
-  sequelize.define(
+  options?: Omit<ModelOptions, "sequelize" | "tableName" | "timestamps" | "underscored">,
+): ModelStatic<Model>;
+export function defineModel<
+  Attributes extends object,
+  CreationAttributes extends object = Partial<Attributes>,
+>(
+  sequelize: Sequelize,
+  modelName: string,
+  tableName: string,
+  fields: ModelAttributes<Model<Attributes, CreationAttributes>, Record<string, unknown>>,
+  options?: Omit<ModelOptions, "sequelize" | "tableName" | "timestamps" | "underscored">,
+): ModelStatic<Model<Attributes, CreationAttributes> & Attributes>;
+export function defineModel(
+  sequelize: Sequelize,
+  modelName: string,
+  tableName: string,
+  fields: ModelAttributes<Model, Record<string, unknown>>,
+  options: Omit<ModelOptions, "sequelize" | "tableName" | "timestamps" | "underscored"> = {},
+): ModelStatic<Model> {
+  return sequelize.define(
     modelName,
     {
       id: {
@@ -35,6 +49,7 @@ export const defineModel = (
       ...options,
     },
   );
+}
 
 export const uuid = () => ({ type: DataTypes.UUID, allowNull: false });
 export const optionalUuid = () => ({ type: DataTypes.UUID, allowNull: true });

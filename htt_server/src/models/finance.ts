@@ -1,5 +1,15 @@
 import { DataTypes, type Sequelize } from "sequelize";
+import type { Model } from "sequelize";
 import { defineModel, optionalUuid, timestamp } from "./defineModel.js";
+
+export interface ScholarshipApplicationAttributes {
+  id: string; reference: string; applicantName: string; guardianName: string; guardianEmail: string | null;
+  guardianPhone: string | null; playerId: string | null; centreId: string | null; programmeId: string | null;
+  eligibilityChecks: unknown[]; assessmentId: string | null; assessmentResult: string | null; notes: string | null;
+  status: string; decisionNotes: string | null; awardAmount: string | null; fundingSecured: string | null;
+  fundingRequired: string | null; startDate: string | null; endDate: string | null; renewalDate: string | null;
+}
+export type ScholarshipApplicationInstance = Model<ScholarshipApplicationAttributes, Partial<ScholarshipApplicationAttributes>>;
 
 export const defineFinanceModels = (sequelize: Sequelize) => ({
   Payment: defineModel(
@@ -203,7 +213,7 @@ export const defineFinanceModels = (sequelize: Sequelize) => ({
     targetLabel: { type: DataTypes.STRING(200), field: "target_label" },
     notes: DataTypes.TEXT,
   }),
-  ScholarshipApplication: defineModel(
+  ScholarshipApplication: defineModel<ScholarshipApplicationAttributes>(
     sequelize,
     "ScholarshipApplication",
     "scholarship_applications",
