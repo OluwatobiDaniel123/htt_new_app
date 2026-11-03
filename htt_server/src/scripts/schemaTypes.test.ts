@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { catalogString, migrationConstraintRequirements, missingConstraintCounts, namedConstraintFailureMessage, postgresColumnTypeMatches, PRODUCTION_SCHEMA, readCatalogField, type PostgresColumnType, type TableConstraintCounts } from "./schemaTypes.js";
 
@@ -120,4 +120,21 @@ test("temporary foreign-key exception leaves the other production schema checks 
   assert.match(productionSetup, /mismatchedTypes\.length/);
   assert.match(productionSetup, /missingIndexes\.length/);
   assert.match(productionSetup, /missingConstraints\.length/);
+});
+
+test("production setup seeder paths resolve to the five required source files", async () => {
+  const productionSetup = await readFile(resolve(process.cwd(), "src/scripts/productionSetup.ts"), "utf8");
+  const gitignore = await readFile(resolve(process.cwd(), ".gitignore"), "utf8");
+  const seederDirectory = resolve(process.cwd(), "seeders");
+  const requiredSeeders = [
+    "20261029000000-seed-rbac.cjs",
+    "20261029000001-phase4-academy-permissions.cjs",
+    "20261029000003-phase6-notification-permissions.cjs",
+    "20261030000000-phase7-safeguarding-permissions.cjs",
+    "20261102000000-coaching-apprentice-permission.cjs",
+  ];
+
+  assert.match(productionSetup, /const seederDirectory = resolve\(process\.cwd\(\), "seeders"\)/);
+  assert.doesNotMatch(gitignore, /^\s*seeders\/\s*$/m);
+  await Promise.all(requiredSeeders.map((name) => access(resolve(seederDirectory, name))));
 });
