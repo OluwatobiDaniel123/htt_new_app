@@ -6,6 +6,40 @@ export interface PostgresColumnType {
   numeric_scale: number | null;
 }
 
+export const PRODUCTION_SCHEMA = "public";
+
+export const namedConstraintFailureMessage = (schema: string, missingConstraints: string[]) =>
+  `Schema verification failed in schema ${schema}; missing migration constraints: ${missingConstraints.join(", ")}. No migrations or seeders were run.`;
+
+export const migrationConstraintRequirements = (migrationSql: string[]) => {
+  const requirements = new Map<string, { c: number; f: number; u: number }>();
+  for (const text of migrationSql) {
+    for (const match of text.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["']?([a-z_][a-z0-9_]*)\s*\(([\s\S]*?)\)\s*;/gi)) {
+      const table = match[1]!.toLowerCase();
+      const body = match[2]!;
+      requirements.set(table, {
+        c: [...body.matchAll(/\bCHECK\s*\(/gi)].length,
+        f: [...body.matchAll(/\bREFERENCES\s+/gi)].length,
+        u: [...body.matchAll(/\bUNIQUE\b/gi)].length,
+      });
+    }
+
+    // Some migrations add referencing columns after table creation. Count those
+    // foreign keys against the same table's requirements as inline REFERENCES.
+    for (const match of text.matchAll(/ALTER\s+TABLE\s+(?:ONLY\s+)?["']?([a-z_][a-z0-9_]*)["']?\s+([\s\S]*?);/gi)) {
+      const table = match[1]!.toLowerCase();
+      const statement = match[2]!;
+      if (!/\bADD\s+COLUMN\b/i.test(statement)) continue;
+      const addedForeignKeys = [...statement.matchAll(/\bREFERENCES\s+/gi)].length;
+      if (!addedForeignKeys) continue;
+      const current = requirements.get(table) ?? { c: 0, f: 0, u: 0 };
+      current.f += addedForeignKeys;
+      requirements.set(table, current);
+    }
+  }
+  return requirements;
+};
+
 const lower = (value: string) => value.toLowerCase();
 
 const receivedFields = (row: unknown) => {

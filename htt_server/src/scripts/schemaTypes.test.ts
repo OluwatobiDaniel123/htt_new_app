@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { catalogString, postgresColumnTypeMatches, readCatalogField, type PostgresColumnType } from "./schemaTypes.js";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { catalogString, migrationConstraintRequirements, namedConstraintFailureMessage, postgresColumnTypeMatches, PRODUCTION_SCHEMA, readCatalogField, type PostgresColumnType } from "./schemaTypes.js";
 
 const column = (values: Partial<PostgresColumnType>): PostgresColumnType => ({
   data_type: "text",
@@ -50,4 +52,38 @@ test("catalog failures report returned field names without exposing row values",
     /expected field tableName or table_name; received fields \[unexpected\]/,
   );
   assert.throws(() => catalogString(undefined, "information_schema.tables.table_name"), /expected a non-empty string, received undefined/);
+});
+
+test("migration constraint parser counts registrations foreign keys from CREATE and ALTER TABLE", async () => {
+  const initialSchema = await readFile(resolve(process.cwd(), "migrations/20261029000000-create-initial-schema.cjs"), "utf8");
+  const requirements = migrationConstraintRequirements([initialSchema]);
+
+  assert.equal(requirements.get("registrations")?.f, 5);
+});
+
+test("migration constraint parser counts foreign keys added by ALTER TABLE for other tables", () => {
+  const requirements = migrationConstraintRequirements([`
+    CREATE TABLE refresh_sessions (id uuid PRIMARY KEY);
+    ALTER TABLE refresh_sessions
+      ADD COLUMN replaced_by_session_id uuid REFERENCES refresh_sessions(id) ON DELETE SET NULL;
+  `]);
+
+  assert.equal(requirements.get("refresh_sessions")?.f, 1);
+});
+
+test("production schema verification targets the public schema consistently", async () => {
+  const productionSetup = await readFile(resolve(process.cwd(), "src/scripts/productionSetup.ts"), "utf8");
+
+  assert.equal(PRODUCTION_SCHEMA, "public");
+  assert.match(productionSetup, /const schemaName = PRODUCTION_SCHEMA/);
+  assert.doesNotMatch(productionSetup, /current_schema\s*\(/i);
+  assert.match(productionSetup, /namespace\.nspname = :schema/);
+  assert.match(productionSetup, /tables\.table_schema = :schema/);
+});
+
+test("named migration constraint failures identify the checked schema", () => {
+  assert.equal(
+    namedConstraintFailureMessage("public", ["registrations_guardian_fk (migration: 20261029000000-create-initial-schema.cjs)"]),
+    "Schema verification failed in schema public; missing migration constraints: registrations_guardian_fk (migration: 20261029000000-create-initial-schema.cjs). No migrations or seeders were run.",
+  );
 });

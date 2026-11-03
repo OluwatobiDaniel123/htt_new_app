@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { QueryTypes } from "sequelize";
-import { catalogString, postgresColumnTypeMatches, readCatalogField, type PostgresColumnType } from "./schemaTypes.js";
+import { catalogString, migrationConstraintRequirements, namedConstraintFailureMessage, postgresColumnTypeMatches, PRODUCTION_SCHEMA, readCatalogField, type PostgresColumnType } from "./schemaTypes.js";
 import { env } from "../config/env.js";
 import { sequelize, models, coachingApprenticeApplication } from "../models/index.js";
 import { seedAdminAccount } from "../services/adminSeedService.js";
@@ -32,6 +32,7 @@ const paymentOnlySchemaMigrations = new Set([
   "20261029000003-phase5-finance.cjs",
   "20261104000000-reconcile-production-payment-and-player-types.cjs",
 ]);
+const schemaName = PRODUCTION_SCHEMA;
 const seeders = [
   "20261029000000-seed-rbac.cjs",
   "20261029000001-phase4-academy-permissions.cjs",
@@ -91,23 +92,6 @@ const requiredTables = (migrationNames: string[], migrationSql: string[]) => {
   return tables;
 };
 
-const tableConstraintRequirements = (migrationSql: string[]) => {
-  const requirements = new Map<string, { c: number; f: number; u: number }>();
-  for (const text of migrationSql) {
-    for (const match of text.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["']?([a-z_][a-z0-9_]*)\s*\(([\s\S]*?)\)\s*;/gi)) {
-      const table = match[1]!.toLowerCase();
-      if (paymentTables.has(table)) continue;
-      const body = match[2]!;
-      requirements.set(table, {
-        c: [...body.matchAll(/\bCHECK\s*\(/gi)].length,
-        f: [...body.matchAll(/\bREFERENCES\s+/gi)].length,
-        u: [...body.matchAll(/\bUNIQUE\b/gi)].length,
-      });
-    }
-  }
-  return requirements;
-};
-
 const verifySchema = async (migrationNames: string[]) => {
   const sql = await Promise.all(migrationNames.map((name) => readFile(resolve(migrationDirectory, name), "utf8")));
   const tables = requiredTables(migrationNames, sql);
@@ -118,8 +102,8 @@ const verifySchema = async (migrationNames: string[]) => {
   const catalogTables = await sequelize.query<Record<string, unknown> | unknown[]>(
     `SELECT tables.table_name AS "tableName"
      FROM information_schema.tables AS tables
-     WHERE tables.table_schema = current_schema() AND tables.table_type = 'BASE TABLE'`,
-    { type: QueryTypes.SELECT, raw: true },
+     WHERE tables.table_schema = :schema AND tables.table_type = 'BASE TABLE'`,
+    { type: QueryTypes.SELECT, raw: true, replacements: { schema: schemaName } },
   );
   const existingTables = new Set(catalogTables.map((row) => catalogString(
     readCatalogField(row, ["tableName", "table_name"], "information_schema.tables table lookup"),
@@ -139,8 +123,8 @@ const verifySchema = async (migrationNames: string[]) => {
     numeric_scale: number | null;
   }>(
     `SELECT table_name, column_name, data_type, udt_name, character_maximum_length, numeric_precision, numeric_scale
-     FROM information_schema.columns WHERE table_schema = current_schema()`,
-    { type: QueryTypes.SELECT, raw: true },
+     FROM information_schema.columns WHERE table_schema = :schema`,
+    { type: QueryTypes.SELECT, raw: true, replacements: { schema: schemaName } },
   );
   for (const row of catalogColumns) {
     const table = catalogString(row.table_name, "information_schema.columns.table_name").toLowerCase();
@@ -196,32 +180,41 @@ const verifySchema = async (migrationNames: string[]) => {
     expectedConstraints.add("uq_data_migration_source_identity");
   }
   const indexRows = await sequelize.query<{ indexname: string }>(
-    "SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()",
-    { type: QueryTypes.SELECT, raw: true },
+    "SELECT indexname FROM pg_indexes WHERE schemaname = :schema",
+    { type: QueryTypes.SELECT, raw: true, replacements: { schema: schemaName } },
   );
   const existingIndexes = new Set(indexRows.map((row) => catalogString(row.indexname, "pg_indexes.indexname").toLowerCase()));
   const missingIndexes = [...expectedIndexes].filter((name) => !existingIndexes.has(name));
   if (missingIndexes.length) fail(`Schema verification failed; missing migration indexes: ${missingIndexes.map((name) => `${name} (migration: ${migrationOrigin(migrationNames, sql, name)})`).join(", ")}. No migrations or seeders were run.`);
   if (expectedConstraints.size) {
     const constraintRows = await sequelize.query<{ conname: string }>(
-      "SELECT conname FROM pg_constraint WHERE connamespace = current_schema()::regnamespace",
-      { type: QueryTypes.SELECT, raw: true },
+      `SELECT constraint_row.conname
+       FROM pg_constraint AS constraint_row
+       JOIN pg_namespace AS namespace ON namespace.oid = constraint_row.connamespace
+       WHERE namespace.nspname = :schema`,
+      { type: QueryTypes.SELECT, raw: true, replacements: { schema: schemaName } },
     );
     const existingConstraints = new Set(constraintRows.map((row) => catalogString(row.conname, "pg_constraint.conname").toLowerCase()));
     const missingConstraints = [...expectedConstraints].filter((name) => !existingConstraints.has(name));
-    if (missingConstraints.length) fail(`Schema verification failed; missing migration constraints: ${missingConstraints.map((name) => `${name} (migration: ${migrationOrigin(migrationNames, sql, name)})`).join(", ")}. No migrations or seeders were run.`);
+    if (missingConstraints.length) {
+      fail(namedConstraintFailureMessage(
+        schemaName,
+        missingConstraints.map((name) => `${name} (migration: ${migrationOrigin(migrationNames, sql, name)})`),
+      ));
+    }
   }
 
-  const constraintRequirements = tableConstraintRequirements(sql);
+  const constraintRequirements = migrationConstraintRequirements(sql);
+  for (const table of paymentTables) constraintRequirements.delete(table);
   if (constraintRequirements.size) {
     const constraintCounts = await sequelize.query<{ table_name: string; contype: string; count: number }>(
       `SELECT relation.relname AS table_name, constraint_row.contype, count(*)::int AS count
        FROM pg_constraint AS constraint_row
        JOIN pg_class AS relation ON relation.oid = constraint_row.conrelid
        JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
-       WHERE namespace.nspname = current_schema() AND constraint_row.contype IN ('c', 'f', 'u')
+       WHERE namespace.nspname = :schema AND constraint_row.contype IN ('c', 'f', 'u')
        GROUP BY relation.relname, constraint_row.contype`,
-      { type: QueryTypes.SELECT, raw: true },
+      { type: QueryTypes.SELECT, raw: true, replacements: { schema: schemaName } },
     );
     const actual = new Map<string, { c: number; f: number; u: number }>();
     for (const row of constraintCounts) {
@@ -231,24 +224,27 @@ const verifySchema = async (migrationNames: string[]) => {
       actual.set(table, counts);
     }
     const missing: string[] = [];
+    const kindLabels = { c: "check constraints", f: "foreign keys", u: "unique constraints" };
     for (const [table, required] of constraintRequirements) {
       const present = actual.get(table) ?? { c: 0, f: 0, u: 0 };
       for (const kind of ["c", "f", "u"] as const) {
-        if (present[kind] < required[kind]) missing.push(`${table} (${required[kind] - present[kind]} ${kind} constraint(s))`);
+        if (present[kind] < required[kind]) {
+          missing.push(`${schemaName}.${table} (${kindLabels[kind]} expected ${required[kind]}, found ${present[kind]})`);
+        }
       }
     }
-    if (missing.length) fail(`Schema verification failed; migration table constraints are missing: ${missing.map((item) => `${item} (migration: ${migrationOrigin(migrationNames, sql, item.split(" ")[0]!.toLowerCase())})`).join(", ")}. No migrations or seeders were run.`);
+    if (missing.length) fail(`Schema verification failed in schema ${schemaName}; migration table constraints are missing: ${missing.map((item) => `${item} (migration: ${migrationOrigin(migrationNames, sql, item.split(" ")[0]!.split(".").at(-1)!.toLowerCase())})`).join(", ")}. No migrations or seeders were run.`);
   }
 };
 
 const reconcileMigrationHistory = async (migrationNames: string[]) => {
   const existence = await sequelize.query<{ exists: boolean }>(
-    `SELECT to_regclass(format('%I.%I', current_schema(), 'SequelizeMeta')) IS NOT NULL AS exists`,
-    { type: QueryTypes.SELECT, raw: true },
+    `SELECT to_regclass(format('%I.%I', :schema, 'SequelizeMeta')) IS NOT NULL AS exists`,
+    { type: QueryTypes.SELECT, raw: true, replacements: { schema: schemaName } },
   );
   const metaExists = existence[0]?.exists === true;
   const recorded: string[] = metaExists
-    ? (await sequelize.query<{ name: string }>('SELECT name FROM "SequelizeMeta" ORDER BY name', { type: QueryTypes.SELECT, raw: true })).map((row) => row.name)
+    ? (await sequelize.query<{ name: string }>(`SELECT name FROM "${schemaName}"."SequelizeMeta" ORDER BY name`, { type: QueryTypes.SELECT, raw: true })).map((row) => row.name)
     : [];
   const known = new Set(migrationNames);
   const unknown = recorded.filter((name) => !known.has(name));
@@ -265,10 +261,10 @@ const reconcileMigrationHistory = async (migrationNames: string[]) => {
   }
   if (!missing.length) return;
   if (!metaExists) {
-    await sequelize.query('CREATE TABLE "SequelizeMeta" ("name" varchar(255) NOT NULL PRIMARY KEY)');
+    await sequelize.query(`CREATE TABLE "${schemaName}"."SequelizeMeta" ("name" varchar(255) NOT NULL PRIMARY KEY)`);
   }
   for (const name of missing) {
-    await sequelize.query('INSERT INTO "SequelizeMeta" ("name") VALUES (:name) ON CONFLICT ("name") DO NOTHING', { replacements: { name } });
+    await sequelize.query(`INSERT INTO "${schemaName}"."SequelizeMeta" ("name") VALUES (:name) ON CONFLICT ("name") DO NOTHING`, { replacements: { name } });
   }
   console.info(`Schema postconditions verified for ${missing.length} migration files; missing SequelizeMeta entries were reconciled. Migration up functions were not executed.`);
 };
@@ -290,11 +286,11 @@ try {
   console.info(`Payment processing is disabled. Deferred migrations remain available for later: ${[...deferredPaymentMigrations].join(", ")}.`);
   console.info("Payment permission seeding is deferred until payment processing is re-enabled.");
   const seederHistory = await sequelize.query<{ exists: boolean }>(
-    `SELECT to_regclass(format('%I.%I', current_schema(), 'SequelizeData')) IS NOT NULL AS exists`,
-      { type: QueryTypes.SELECT, raw: true },
+    `SELECT to_regclass(format('%I.%I', :schema, 'SequelizeData')) IS NOT NULL AS exists`,
+      { type: QueryTypes.SELECT, raw: true, replacements: { schema: schemaName } },
   );
   if (seederHistory[0]?.exists) {
-    const rows = await sequelize.query<{ count: number }>('SELECT count(*)::int AS count FROM "SequelizeData"', { type: QueryTypes.SELECT, raw: true });
+    const rows = await sequelize.query<{ count: number }>(`SELECT count(*)::int AS count FROM "${schemaName}"."SequelizeData"`, { type: QueryTypes.SELECT, raw: true });
     console.info(`Seeder history: SequelizeData exists with ${rows[0]?.count ?? 0} row(s), but this project does not configure Sequelize seeder storage; those rows are not treated as seeder history.`);
   } else {
     console.info("Seeder history: not configured; Sequelize CLI does not persist seeder history.");
