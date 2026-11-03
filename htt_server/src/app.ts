@@ -31,6 +31,7 @@ import { mediaRoutes } from "./routes/mediaRoutes.js";
 import { analyticsRoutes } from "./routes/analyticsRoutes.js";
 import { auditRoutes } from "./routes/auditRoutes.js";
 import { publicIntakeRoutes } from "./routes/publicIntakeRoutes.js";
+import { coachingApprenticeRoutes } from "./routes/coachingApprenticeRoutes.js";
 
 export const app = express();
 const require = createRequire(import.meta.url);
@@ -47,6 +48,7 @@ app.use(
     credentials: true,
   }) as unknown as RequestHandler,
 );
+
 app.use(
   express.json({
     limit: "1mb",
@@ -55,12 +57,14 @@ app.use(
     },
   }) as unknown as RequestHandler,
 );
+
 app.use(
   express.urlencoded({
     extended: true,
     limit: "1mb",
   }) as unknown as RequestHandler,
 );
+
 app.use(cookieParser() as unknown as RequestHandler);
 app.use(
   pinoHttp({
@@ -80,6 +84,7 @@ app.use(originGuard);
 
 app.use("/api/v1", healthRoutes);
 app.use("/api/v1/public", publicIntakeRoutes);
+app.use("/api/v1/coaching-apprentices", coachingApprenticeRoutes);
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/staff", staffRoutes);
 app.use("/api/v1/roles", roleRoutes);

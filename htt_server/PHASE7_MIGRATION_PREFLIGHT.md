@@ -1,5 +1,13 @@
 # Phase 7 Base44 Data Migration Preflight
 
+## Current architecture update (2026-11-02)
+
+The active frontend now uses the custom React/Vite and Express API architecture.
+Legacy entity/function files and historical migration records remain preserved
+until external callers and data migration are verified. The migration count
+discrepancy remains unresolved; no migration or database change was performed.
+The preflight findings below are historical and remain unchanged.
+
 ## Status
 
 **Preflight prepared from static schemas only. No Base44 export, source database, target database, or production credentials were accessed. No records were counted or migrated.** Counts and conflict totals are therefore `NOT MEASURED`. No target migration or seeder was executed. This is not a clearance to migrate production data.

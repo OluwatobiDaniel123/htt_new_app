@@ -95,9 +95,20 @@ export const createProgramme = async (
   const created = await sequelize.transaction(async (transaction) => {
     const programme = (await models.Programme.create(
       {
+        slug: input.slug ?? null,
         name: input.name.trim(),
+        tagline: input.tagline ?? null,
         code: input.code?.trim().toUpperCase() ?? null,
         description: input.description ?? null,
+        ageGroup: input.ageGroup ?? null,
+        trainingDays: input.trainingDays ?? [],
+        duration: input.duration ?? null,
+        price: input.price ?? null,
+        benefits: input.benefits ?? [],
+        requirements: input.requirements ?? [],
+        equipment: input.equipment ?? [],
+        icon: input.icon ?? null,
+        featured: input.featured ?? false,
         ageGroupLabel: input.ageGroupLabel.trim(),
         ageMin: input.ageMin ?? null,
         ageMax: input.ageMax ?? null,
@@ -142,6 +153,7 @@ export const updateProgramme = async (
     checkAgeBounds(merged);
     const updates: any = { ...input };
     if (updates.name !== undefined) updates.name = updates.name.trim();
+    if (updates.slug !== undefined) updates.slug = updates.slug?.trim() || null;
     if (updates.code !== undefined)
       updates.code = updates.code?.trim().toUpperCase() || null;
     if (updates.ageGroupLabel !== undefined)

@@ -1,5 +1,5 @@
 {
-  "name": "base44-app",
+  "name": "htt-academy-admin",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -7,14 +7,12 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint src vite.config.js eslint.config.js --quiet",
-    "test": "node --test src/api/client.test.js",
+    "test": "node --test src/api/client.test.js src/api/coachingApprentices.test.js",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc -p ./jsconfig.json",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@base44/sdk": "^0.8.57",
-    "@base44/vite-plugin": "^1.0.50",
     "@hello-pangea/dnd": "^17.0.0",
     "@hookform/resolvers": "^4.1.2",
     "@radix-ui/react-accordion": "^1.2.3",

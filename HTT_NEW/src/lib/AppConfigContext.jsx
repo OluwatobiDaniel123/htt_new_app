@@ -8,6 +8,7 @@ const permissionKeys = {
   players: { view: ['players.read'], full: ['players.create', 'players.update', 'players.delete'] },
   guardians: { view: ['guardians.read'], full: ['guardians.create', 'guardians.update', 'guardians.delete'] },
   registrations: { view: ['registrations.read'], full: ['registrations.create', 'registrations.update', 'registrations.approve'] },
+  coaching_apprentices: { view: ['coaching_apprentices'], full: ['coaching_apprentices'] },
   centres: { view: ['centres.read'], full: ['centres.create', 'centres.update', 'centres.delete'] },
   programmes: { view: ['programmes.read'], full: ['programmes.create', 'programmes.update', 'programmes.delete'] },
   payments: { view: ['payments.read'], full: ['payments.record', 'payments.initialize', 'payments.refunds.request'] },

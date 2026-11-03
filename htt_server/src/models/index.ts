@@ -6,6 +6,7 @@ import { defineFinanceModels } from "./finance.js";
 import { defineIdentityModels } from "./identity.js";
 import { defineLeagueModels } from "./league.js";
 import { defineSystemModels } from "./system.js";
+import { defineCoachingApprenticeModels } from "./coachingApprentice.js";
 
 export const models = {
   ...defineIdentityModels(sequelize),
@@ -16,6 +17,9 @@ export const models = {
   ...defineContentModels(sequelize),
   ...defineSystemModels(sequelize),
 };
+
+export const coachingApprenticeApplication =
+  defineCoachingApprenticeModels(sequelize).CoachingApprenticeApplication;
 
 const {
   StaffAccount,

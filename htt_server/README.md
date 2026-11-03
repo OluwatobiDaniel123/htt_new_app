@@ -1,6 +1,6 @@
 # HTT Academy API
 
-Independent Express 5 and TypeScript backend scaffold. The existing React and Base44 application remains separate and unchanged.
+HTT Academy's custom Express 5 and TypeScript REST backend. The React and Vite frontend in `../HTT_NEW` uses this API; authentication is handled by the custom JWT and HttpOnly cookie implementation.
 
 See [DATABASE_ARCHITECTURE.md](./DATABASE_ARCHITECTURE.md) for the proposed schema, mapping, relationships, security notes, and unresolved design decisions.
 
@@ -39,7 +39,7 @@ The API listens on port 4000 by default. Health: `GET http://localhost:4000/api/
 
 Sequelize is configured for Supabase-hosted PostgreSQL via `DATABASE_URL` or the `PG*` variables. SSL and pool options are environment controlled. The connection is configured but is not authenticated on server startup. Migrations and RBAC seeding require a configured development database and are intentionally not run here.
 
-`npm test` builds and runs unit and unauthenticated route smoke tests. `npm run db:seed:rbac` seeds the existing Base44 role matrix and permission catalog. Apply `npm run db:seed:phase4` only after the Phase 3 RBAC seed; neither seeder has been run.
+`npm test` builds and runs unit and unauthenticated route smoke tests. `npm run db:seed:rbac` seeds the existing staff role matrix and permission catalog. Apply `npm run db:seed:phase4` only after the Phase 3 RBAC seed; neither seeder has been run.
 
 Phase 4 adds `20261029000002-academy-integrity.cjs` for one player per source registration and normalized guardian-phone uniqueness. Before applying it to an existing database, check for duplicate non-null `players.registration_id` values and duplicate phone numbers after stripping non-digits; the unique indexes intentionally fail rather than silently choosing a record.
 

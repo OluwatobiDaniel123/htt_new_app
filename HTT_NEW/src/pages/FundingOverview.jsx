@@ -24,6 +24,7 @@ import { AddButton } from '@/components/common/TableBits';
 import useCollection from '@/hooks/useCollection';
 
 const CATEGORIES = ['individual_player', 'scholarship_fund', 'school_project', 'corporate_partnership'];
+const sumOf = (rows, key) => rows.reduce((total, row) => total + Number(row?.[key] || 0), 0);
 
 export default function FundingOverview() {
   const { can, settings } = useAppConfig();

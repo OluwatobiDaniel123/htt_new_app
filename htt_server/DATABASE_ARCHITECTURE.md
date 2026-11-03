@@ -1,6 +1,14 @@
 # HTT Academy database architecture — Phase 2
 
-This is a proposed PostgreSQL design based on the Base44 entity definitions and the frontend/backend workflows inspected on 2026-10-29. It is not a claim that a database has been provisioned or tested. Base44 remains in place and is unchanged. Nothing in this phase connects to Supabase or runs a migration.
+> **Current architecture note (2026-11-02):** The active runtime is the custom
+> Express/Sequelize backend connected to Supabase PostgreSQL. This document
+> contains legacy source-system mapping and proposed schema notes; it does not
+> assert that every described table or record exists in the live database.
+> Legacy entity/function source is retained while data migration and external
+> endpoint consumers are verified. The Supabase migration-history discrepancy
+> remains unresolved. Do not run migrations or seeders as part of this note.
+
+This historical Phase 2 proposal was based on the source entity definitions and frontend/backend workflows inspected on 2026-10-29. At that time it did not claim a database had been provisioned or tested, and no Supabase connection or migration was part of that phase. It is retained as a source-to-target mapping, not current setup instructions.
 
 ## Inventory and mapping
 

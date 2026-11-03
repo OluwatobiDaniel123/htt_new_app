@@ -1,7 +1,9 @@
 import React from "react";
 import { GraduationCap } from "lucide-react";
+import { useMemo } from "react";
 import ResourcePage from "@/components/common/ResourcePage";
 import StatusBadge from "@/components/common/StatusBadge";
+import useCollection from "@/hooks/useCollection";
 import { currency, labelize } from "@/lib/constants";
 
 const AVAILABILITY = {
@@ -17,9 +19,25 @@ const STATUS = {
 };
 
 export default function Programmes() {
+  const centres = useCollection("Centre", {}, { sort: "name", limit: 100 });
+  const centreOptions = useMemo(
+    () => centres.items.map((centre) => ({ value: centre.id, label: centre.name })),
+    [centres.items],
+  );
   const fields = [
+    { name: "slug", label: "Slug" },
     { name: "name", label: "Programme name", required: true },
+    { name: "tagline", label: "Tagline" },
     { name: "code", label: "Code", placeholder: "e.g. FDN-810" },
+    { name: "age_group", label: "Age group" },
+    { name: "training_days", label: "Training days (one per line)", type: "string-array", colSpan: 2, rows: 2 },
+    { name: "duration", label: "Duration" },
+    { name: "price", label: "Display price" },
+    { name: "benefits", label: "Benefits (one per line)", type: "string-array", colSpan: 2, rows: 3 },
+    { name: "requirements", label: "Requirements (one per line)", type: "string-array", colSpan: 2, rows: 3 },
+    { name: "equipment", label: "Equipment (one per line)", type: "string-array", colSpan: 2, rows: 3 },
+    { name: "icon", label: "Icon" },
+    { name: "featured", label: "Featured", type: "checkbox" },
     {
       name: "age_group_label",
       label: "Age group",
@@ -68,6 +86,13 @@ export default function Programmes() {
       defaultValue: "active",
     },
     { name: "notes", label: "Notes", type: "textarea", colSpan: 2, rows: 2 },
+    {
+      name: "centre_ids",
+      label: "Centres",
+      type: "multiselect",
+      options: centreOptions,
+      colSpan: 2,
+    },
   ];
 
   const columns = [
@@ -142,6 +167,7 @@ export default function Programmes() {
         },
       ]}
       defaultValues={{
+        featured: false,
         availability: "open",
         status: "active",
         assessments_required: true,

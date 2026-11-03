@@ -1,8 +1,17 @@
 # Phase 7 Integration Status
 
-## Verdict: Incomplete — staging verification and migration remain
+## Current architecture update (2026-11-02)
 
-Phase 7 REST integrations have been added for the workflows listed below. This does not establish end-to-end parity: frontend TypeScript still fails, no isolated PostgreSQL environment was supplied, media asset retrieval is incomplete, and not every source workflow has been replaced. Keep Base44 files, entities, functions, SDK and Vite plugin until migration and parity are verified and removal is approved.
+The active frontend is React/Vite and uses the custom Express API. The active
+frontend SDK/plugin integration has been removed. Legacy entity and function
+source remains pending verification of external callers and data migration.
+The migration tracking discrepancy remains unresolved; no migrations, seeders,
+database writes, or webhook changes were performed in this update. Findings
+below are preserved as a historical Phase 7 review.
+
+## Historical verdict: Incomplete — staging verification and migration remain
+
+At the time of this review, Phase 7 REST integrations had been added for the workflows listed below. This did not establish end-to-end parity. The historical instruction to keep the SDK and Vite plugin is superseded by the current architecture update above; it records the state at the time, not current setup guidance.
 
 ## REST-backed workflows
 
@@ -23,8 +32,8 @@ Generic collection routes apply validation, authentication, permission checks an
 - `npm run typecheck` in the frontend currently fails with hundreds of JSX prop typing diagnostics across shared UI wrappers and pages. TypeScript settings were not relaxed.
 - Private Cloudinary uploads can be registered and attached, but a signed/private asset delivery endpoint is still needed for safely previewing or downloading private media and registration documents. Asset registration validates Cloudinary URL and staff-owned public ID prefix; it does not query Cloudinary to independently verify the uploaded object metadata.
 - No isolated PostgreSQL database was configured. Database-backed route behavior, authorization against seeded roles, migration compatibility, browser workflows and provider integration are not verified end to end.
-- Root production build passes with a missing Base44 app-ID warning and a large JavaScript chunk warning. Frontend ESLint passes.
-- Remaining Base44 references include the SDK client (`src/api/base44Client.js`), legacy helper imports (`src/lib/metrics.js`, `src/lib/audit.js`), OAuth consent/token utilities (`src/lib/app-params.js`, `src/pages/OAuthConsent.jsx`), Vite plugin/configuration, package dependencies, and legacy image URL/event compatibility. Some helpers appear unused by current routes, but should be verified before removal.
+- At the time, the frontend build emitted a legacy app-ID warning; the current cleanup has removed that SDK/plugin integration. The current frontend build retains a large JavaScript chunk warning.
+- The Base44 frontend locations listed in the original review have since been removed or detached; legacy entity/function source, historical migration records and migration documentation remain pending external caller and data verification.
 
 ## Verification record
 
@@ -46,5 +55,5 @@ No production database was accessed. No migration or seeder was executed, and no
 3. Add private media delivery and document migration support; verify Cloudinary assets server-side.
 4. Build a versioned migration runner using stable source-to-target ID mapping, resumability, relationship validation, and payment/refund/registration reconciliation. Run dry-run only against a point-in-time export and isolated database.
 5. Verify every frontend workflow in staging with test accounts and no real payment transactions.
-6. Review Base44 OAuth replacement and dead helper usage, then propose a separate removal change after parity and data migration sign-off.
+6. Verify any external consumers of legacy serverless endpoints and reconcile/migrate legacy data in an isolated environment before removing retained entity/function source.
 

@@ -38,6 +38,8 @@ const buildInitial = (fields, initial) => {
       base[f.name] = !!raw;
     } else if (f.type === 'multiselect') {
       base[f.name] = Array.isArray(raw) ? raw : [];
+    } else if (f.type === 'string-array') {
+      base[f.name] = Array.isArray(raw) ? raw.join('\n') : '';
     } else if (f.type === 'datetime') {
       base[f.name] = String(raw).slice(0, 16);
     } else {
@@ -92,6 +94,9 @@ export default function FormDialog({
       if (f.type === 'number' || f.type === 'money') {
         v = v === '' || v === null || v === undefined ? undefined : Number(v);
       }
+      if (f.type === 'string-array') {
+        v = String(v || '').split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+      }
       if (typeof v === 'string') v = v.trim();
       if (v !== undefined && v !== '') payload[f.name] = v;
       if (v === '' || v === undefined) {
@@ -103,6 +108,7 @@ export default function FormDialog({
       }
       if (f.type === 'checkbox') payload[f.name] = !!values[f.name];
       if (f.type === 'multiselect') payload[f.name] = values[f.name] || [];
+      if (f.type === 'string-array') payload[f.name] = v;
     });
     setSaving(true);
     try {
@@ -141,7 +147,7 @@ export default function FormDialog({
           </Label>
         ) : null}
 
-        {f.type === 'textarea' ? (
+        {f.type === 'textarea' || f.type === 'string-array' ? (
           <Textarea {...common} rows={f.rows || 3} className="text-[13px]" />
         ) : f.type === 'select' ? (
           <Select

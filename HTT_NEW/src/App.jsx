@@ -24,6 +24,8 @@ import PlayerDetail from "@/pages/PlayerDetail";
 import Guardians from "@/pages/Guardians";
 import Registrations from "@/pages/Registrations";
 import RegistrationDetail from "@/pages/RegistrationDetail";
+import CoachingApprentices from "@/pages/CoachingApprentices";
+import CoachingApprenticeDetail from "@/pages/CoachingApprenticeDetail";
 import Assessments from "@/pages/Assessments";
 import Attendance from "@/pages/Attendance";
 import Centres from "@/pages/Centres";
@@ -103,6 +105,8 @@ const AuthenticatedApp = () => {
           <Route path="/guardians" element={<Guardians />} />
           <Route path="/registrations" element={<Registrations />} />
           <Route path="/registrations/:id" element={<RegistrationDetail />} />
+          <Route path="/coaching-apprentices" element={<CoachingApprentices />} />
+          <Route path="/coaching-apprentices/:id" element={<CoachingApprenticeDetail />} />
           <Route path="/assessments" element={<Assessments />} />
           <Route path="/attendance" element={<Attendance />} />
           <Route path="/centres" element={<Centres />} />

@@ -30,6 +30,7 @@ export default function Centres() {
   );
 
   const fields = [
+    { name: "slug", label: "Slug" },
     {
       name: "name",
       label: "Centre name",
@@ -49,6 +50,9 @@ export default function Centres() {
       placeholder: "e.g. Ikeja",
     },
     { name: "address", label: "Address" },
+    { name: "city", label: "City" },
+    { name: "region", label: "Region" },
+    { name: "map_embed", label: "Map embed", type: "textarea", colSpan: 2, rows: 2 },
     {
       name: "map_link",
       label: "Map link",
@@ -92,9 +96,15 @@ export default function Centres() {
     { name: "contact_name", label: "Contact name" },
     { name: "contact_phone", label: "Contact phone", type: "tel" },
     { name: "contact_email", label: "Contact email", type: "email" },
+    { name: "image", label: "Image URL" },
+    {
+      name: "coming_soon",
+      label: "Coming soon",
+      type: "checkbox",
+    },
     {
       name: "programme_ids",
-      label: "Programmes offered",
+      label: "Programmes",
       type: "multiselect",
       options: programmeOptions,
       colSpan: 2,
@@ -187,6 +197,7 @@ export default function Centres() {
         },
       ]}
       defaultValues={{
+        coming_soon: false,
         status: "pending_verification",
         review_status: "pending_verification",
         proposed_area: true,

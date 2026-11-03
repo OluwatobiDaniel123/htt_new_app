@@ -142,15 +142,21 @@ export const createCentre = async (
   const centre = await sequelize.transaction(async (transaction) => {
     const created = (await models.Centre.create(
       {
+        slug: input.slug ?? null,
         name: input.name.trim(),
         code: input.code.trim().toUpperCase(),
         area: input.area.trim(),
         address: input.address ?? null,
+        city: input.city ?? null,
+        region: input.region ?? null,
+        mapEmbed: input.mapEmbed ?? null,
         mapLink: input.mapLink ?? null,
         leadCoach: input.leadCoach ?? null,
         staffEmails: input.staffEmails ?? [],
         ageGroups: input.ageGroups ?? [],
         schedule: input.schedule ?? null,
+        image: input.image ?? null,
+        comingSoon: input.comingSoon ?? false,
         approvedFee: input.approvedFee ?? null,
         capacity: input.capacity ?? null,
         contactName: input.contactName ?? null,
@@ -193,6 +199,7 @@ export const updateCentre = async (
     validateState({ ...centre.toJSON(), ...input });
     const updates: any = { ...input };
     if (updates.name !== undefined) updates.name = updates.name.trim();
+    if (updates.slug !== undefined) updates.slug = updates.slug?.trim() || null;
     if (updates.code !== undefined)
       updates.code = updates.code.trim().toUpperCase();
     if (updates.area !== undefined) updates.area = updates.area.trim();

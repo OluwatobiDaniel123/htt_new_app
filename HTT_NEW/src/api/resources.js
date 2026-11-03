@@ -86,6 +86,7 @@ const normalizeRecord = (entity, raw) => {
     row.programme_name ??= row.programme?.name;
   }
   if (entity === 'Centre') row.programme_ids ??= row.programmes?.map((item) => item.id) || [];
+  if (entity === 'Programme') row.centre_ids ??= row.centres?.map((item) => item.id) || [];
   if (entity === 'Programme') row.age_group_label ??= row.age_group_label;
   if (entity === 'Registration') {
     row.centre_name ??= row.centre?.name;
@@ -188,8 +189,8 @@ const acceptedFields = {
   Player: ['full_name','date_of_birth','age_group','centre_id','programme_id','registration_status','scholarship_status','document_verification','development_notes','match_appearances','match_notes','school'],
   Guardian: ['full_name','email','phone','address','preferred_contact','communication_preferences','account_status','consent_status','notes'],
   Registration: ['guardian_name','guardian_email','guardian_phone','guardian_address','child_name','child_date_of_birth','centre_id','programme_id','age_group','pathway','consent_media','consent_data','consent_medical','assigned_reviewer_id','internal_notes','initial_note'],
-  Centre: ['name','code','area','address','map_link','lead_coach','staff_emails','age_groups','schedule','approved_fee','capacity','contact_name','contact_phone','contact_email','operational_notes','registration_available','review_status','status','proposed_area','programme_ids'],
-  Programme: ['name','code','description','age_group_label','age_min','age_max','approved_fee','schedule','capacity','assessments_required','availability','status','notes','centre_ids'],
+  Centre: ['slug','name','code','area','address','city','region','map_embed','map_link','lead_coach','staff_emails','age_groups','schedule','approved_fee','capacity','contact_name','contact_phone','contact_email','operational_notes','registration_available','review_status','status','proposed_area','programme_ids','image','coming_soon'],
+  Programme: ['slug','name','tagline','code','description','age_group','age_group_label','training_days','duration','price','benefits','requirements','equipment','icon','featured','age_min','age_max','approved_fee','schedule','capacity','assessments_required','availability','status','notes','centre_ids'],
   AttendanceSession: ['centre_id','programme_id','session_date','coach_id','status','notes'],
   Assessment: ['player_id','registration_id','type','scheduled_at','centre_id','coach_id','coach_email','status','criteria_scores','overall_rating','feedback','improvement_targets','completed_at'],
   ScholarshipApplication: ['reference','applicant_name','guardian_name','guardian_email','guardian_phone','player_id','centre_id','programme_id','eligibility_checks','assessment_id','assessment_result','notes','status','decision_notes','award_amount','funding_secured','funding_required','start_date','end_date','renewal_date'],
@@ -224,8 +225,8 @@ export async function saveResource(entity, id, input) {
     Player: ['centreId','programmeId','developmentNotes','matchNotes','school'],
     Guardian: ['email','address','preferredContact','notes'],
     Registration: ['guardianEmail','guardianAddress','childDateOfBirth','centreId','programmeId','assignedReviewerId','internalNotes'],
-    Centre: ['address','mapLink','leadCoach','schedule','approvedFee','capacity','contactName','contactPhone','contactEmail','operationalNotes'],
-    Programme: ['code','description','ageMin','ageMax','approvedFee','schedule','capacity','notes'],
+    Centre: ['slug','address','city','region','mapEmbed','mapLink','leadCoach','schedule','approvedFee','capacity','contactName','contactPhone','contactEmail','operationalNotes','image'],
+    Programme: ['slug','tagline','description','ageGroup','trainingDays','duration','price','icon','code','ageMin','ageMax','approvedFee','schedule','capacity','notes'],
   }[entity] || [];
   for (const [key, value] of Object.entries(body)) if (value === '') {
     if (nullableFields.includes(key)) body[key] = null;

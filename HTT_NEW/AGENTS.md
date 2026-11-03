@@ -1,34 +1,27 @@
-# AGENTS.md
+# HTT Academy Admin — Agent Notes
 
-## Project Context
+## Architecture
 
-This is a Base44 app repository. Treat it as user-owned application code, keep changes focused on the user's request, and preserve existing project conventions.
+- Frontend: React and Vite in this directory.
+- Backend: the custom Express and TypeScript API in `../htt_server`.
+- Database: Supabase PostgreSQL, accessed by the backend.
+- Authentication: the custom backend's JWT and HttpOnly cookie flow.
 
-Start with `README.md` for local setup, environment variables, and publish workflow.
+Read this file and `README.md` before making changes. Preserve existing pages,
+layouts, navigation, API behavior, authentication, permissions, and user changes.
+Use the existing API client in `src/api/client.js` and existing UI patterns.
+Do not add another backend or call the database directly from the frontend.
 
-## Base44 References
+## Local development
 
-- CLI overview: https://docs.base44.com/developers/references/cli/get-started/overview.md
-- Agent skills: https://docs.base44.com/developers/backend/overview/skills.md
+Install dependencies with `npm install`, then run `npm run dev`. Vite proxies
+`/api` to `http://localhost:8000`; configure the Express development server or
+`VITE_API_BASE_URL` to match the local setup. Do not use production credentials
+for local testing.
 
-If your agent supports Agent Skills, install or update Base44 skills before Base44-specific work:
+## Checks
 
-```bash
-npx skills add base44/skills
-```
-
-## Key Files
-
-- `src/`: frontend application source.
-- `src/api/base44Client.js`: frontend Base44 SDK client.
-- `vite.config.js`: Vite config and Base44 Vite plugin setup.
-- `.env.local`: local-only environment values; never commit secrets.
-
-## Working Notes
-
-- Use `base44 dev` as the default local development command when you need the local Base44 backend. It can run the backend and frontend together.
-- When docs or code mention the frontend being started automatically, that usually means the Base44 project config includes `site.serveCommand`, for example `"serveCommand": "npm run dev"` in `base44/config.jsonc`.
-- Use `npm run dev` only for frontend-only work against the hosted Base44 backend.
-- Prefer the existing Base44 CLI workflow over adding new npm scripts for Base44-specific tasks.
-- Reuse the existing SDK client and Vite plugin patterns before adding new Base44 integration paths.
-- Run the relevant checks from `package.json` before finishing code changes.
+Available scripts are `npm run lint`, `npm test`, `npm run typecheck`, and
+`npm run build`. The backend has corresponding lint, test, and build scripts in
+`../htt_server/package.json`. Never run database migrations or seeders unless
+the user explicitly authorizes them.

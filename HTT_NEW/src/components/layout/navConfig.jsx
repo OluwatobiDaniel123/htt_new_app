@@ -45,6 +45,7 @@ export const NAV_GROUPS = [
       { label: 'Players', to: '/players', icon: Users, module: 'players' },
       { label: 'Parents & Guardians', to: '/guardians', icon: UserRound, module: 'guardians' },
       { label: 'Registrations', to: '/registrations', icon: ClipboardList, module: 'registrations' },
+      { label: 'Coaching Apprentices', to: '/coaching-apprentices', icon: UserRound, module: 'coaching_apprentices' },
       { label: 'Assessments', to: '/assessments', icon: ClipboardCheck, module: 'assessments' },
       { label: 'Attendance', to: '/attendance', icon: CalendarCheck, module: 'attendance' },
       { label: 'Centres', to: '/centres', icon: MapPin, module: 'centres' },

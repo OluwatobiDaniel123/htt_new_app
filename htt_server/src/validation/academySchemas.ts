@@ -218,15 +218,21 @@ export const centreListQuery = z
   })
   .strict();
 const centreFields = {
+  slug: optionalText(180),
   name: z.string().min(1).max(180),
   code: z.string().min(1).max(40),
   area: z.string().min(1).max(160),
   address: optionalText(2000),
+  city: optionalText(160),
+  region: optionalText(160),
+  mapEmbed: optionalText(5000),
   mapLink: z.string().url().nullable().optional(),
   leadCoach: optionalText(200),
   staffEmails: z.array(z.string().email()).max(30).optional(),
   ageGroups: z.array(z.string().max(80)).max(20).optional(),
   schedule: optionalText(1000),
+  image: optionalText(5000),
+  comingSoon: z.boolean().optional(),
   approvedFee: z.number().min(0).max(1000000000).nullable().optional(),
   capacity: z.number().int().min(0).max(100000).nullable().optional(),
   contactName: optionalText(200),
@@ -286,9 +292,20 @@ export const programmeListQuery = z
   })
   .strict();
 const programmeFields = {
+  slug: optionalText(180),
   name: z.string().min(1).max(180),
+  tagline: optionalText(1000),
   code: z.string().max(40).nullable().optional(),
   description: optionalText(5000),
+  ageGroup: optionalText(80),
+  trainingDays: z.array(z.string().max(80)).max(30).optional(),
+  duration: optionalText(160),
+  price: optionalText(500),
+  benefits: z.array(z.string().max(1000)).max(100).optional(),
+  requirements: z.array(z.string().max(1000)).max(100).optional(),
+  equipment: z.array(z.string().max(1000)).max(100).optional(),
+  icon: optionalText(120),
+  featured: z.boolean().optional(),
   ageGroupLabel: z.string().min(1).max(80),
   ageMin: z.number().int().min(0).max(100).nullable().optional(),
   ageMax: z.number().int().min(0).max(100).nullable().optional(),
