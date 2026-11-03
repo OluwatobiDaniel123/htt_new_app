@@ -17,6 +17,7 @@
     "db:migrate": "sequelize-cli db:migrate",
     "db:migrate:undo": "sequelize-cli db:migrate:undo",
     "db:production-setup": "node dist/scripts/productionSetup.js",
+    "db:reconcile-production-types": "node dist/scripts/reconcileProductionTypes.js",
     "db:seed:rbac": "sequelize-cli db:seed --seed 20261029000000-seed-rbac.cjs",
     "db:seed:phase4": "sequelize-cli db:seed --seed 20261029000001-phase4-academy-permissions.cjs",
     "db:seed:phase5": "sequelize-cli db:seed --seed 20261029000002-phase5-finance-permissions.cjs",
