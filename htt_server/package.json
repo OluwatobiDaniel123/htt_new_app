@@ -11,7 +11,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "npm run build && node --test dist/auth/auth.test.js dist/recruitment/coachingApprentice.test.js",
+    "test": "npm run build && node --test dist/auth/auth.test.js dist/recruitment/coachingApprentice.test.js dist/scripts/schemaTypes.test.js",
     "seed": "npm run build && node dist/scripts/seedAdmin.js",
     "lint": "eslint src eslint.config.js sequelize-cli-config.cjs",
     "db:migrate": "sequelize-cli db:migrate",

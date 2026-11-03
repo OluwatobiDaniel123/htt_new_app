@@ -14,8 +14,8 @@ export function safeReturnTo() {
   try {
     const url = new URL(raw, window.location.origin);
     if (url.origin !== window.location.origin) return "/";
-    // Strip credential-like and platform bootstrap parameters before redirecting.
-    for (const p of ["access_token", "clear_access_token", "app_id", "app_base_url", "functions_version", "from_url"]) {
+    // Strip credential-like parameters before redirecting.
+    for (const p of ["access_token", "clear_access_token"]) {
       url.searchParams.delete(p);
     }
     const path = url.pathname + url.search;

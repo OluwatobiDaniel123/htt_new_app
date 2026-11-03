@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { QueryTypes } from "sequelize";
+import { postgresColumnTypeMatches, type PostgresColumnType } from "./schemaTypes.js";
 import { env } from "../config/env.js";
 import { sequelize, models, coachingApprenticeApplication } from "../models/index.js";
 import { seedAdminAccount } from "../services/adminSeedService.js";
@@ -21,6 +22,36 @@ const seeders = [
 
 const fail = (message: string): never => {
   throw new Error(message);
+};
+
+const catalogString = (value: unknown, context: string): string => {
+  if (typeof value !== "string" || !value.trim()) {
+    return fail(`Schema verification failed while reading ${context}: PostgreSQL returned an empty or non-string name.`);
+  }
+  return value;
+};
+
+const tableNameOf = (model: { getTableName: () => unknown }, context: string) => {
+  const value = model.getTableName();
+  const name = typeof value === "string"
+    ? value
+    : typeof value === "object" && value !== null && "tableName" in value
+      ? value.tableName
+      : undefined;
+  return catalogString(name, `${context} table name`);
+};
+
+const sequelizeTypeSql = (type: unknown, context: string) => {
+  if (typeof type !== "object" || type === null || !("toSql" in type) || typeof type.toSql !== "function") {
+    return fail(`Schema verification failed for ${context}: Sequelize did not expose a SQL column type.`);
+  }
+  return type.toSql();
+};
+
+const migrationOrigin = (migrationNames: string[], sql: string[], ...terms: string[]) => {
+  const lowerTerms = terms.map((term) => term.toLowerCase());
+  const origins = migrationNames.filter((_name, index) => lowerTerms.every((term) => sql[index]!.toLowerCase().includes(term)));
+  return origins.length ? origins.join(", ") : "migration postcondition";
 };
 
 const assertProductionConfiguration = () => {
@@ -66,31 +97,66 @@ const verifySchema = async (migrationNames: string[]) => {
   const sql = await Promise.all(migrationNames.map((name) => readFile(resolve(migrationDirectory, name), "utf8")));
   const tables = requiredTables(migrationNames, sql);
   const expectedModels = [...Object.values(models), coachingApprenticeApplication];
-  for (const model of expectedModels) tables.add(String(model.getTableName()).toLowerCase());
+  for (const model of expectedModels) tables.add(tableNameOf(model, "Sequelize model").toLowerCase());
 
   const catalogTables = await sequelize.query<{ table_name: string }>(
     "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'",
     { type: QueryTypes.SELECT },
   );
-  const existingTables = new Set(catalogTables.map((row) => row.table_name.toLowerCase()));
+  const existingTables = new Set(catalogTables.map((row) => catalogString(row.table_name, "information_schema.tables.table_name").toLowerCase()));
   const missingTables = [...tables].filter((table) => !existingTables.has(table));
-  if (missingTables.length) fail(`Schema verification failed; missing existing tables: ${missingTables.join(", ")}. No migrations or seeders were run.`);
+  if (missingTables.length) fail(`Schema verification failed; missing existing tables: ${missingTables.map((table) => `${table} (migration: ${migrationOrigin(migrationNames, sql, table)})`).join(", ")}. No migrations or seeders were run.`);
+
+  const columnsByTable = new Map<string, Map<string, PostgresColumnType>>();
+  const catalogColumns = await sequelize.query<{
+    table_name: string;
+    column_name: string;
+    data_type: string;
+    udt_name: string;
+    character_maximum_length: number | null;
+    numeric_precision: number | null;
+    numeric_scale: number | null;
+  }>(
+    `SELECT table_name, column_name, data_type, udt_name, character_maximum_length, numeric_precision, numeric_scale
+     FROM information_schema.columns WHERE table_schema = current_schema()`,
+    { type: QueryTypes.SELECT },
+  );
+  for (const row of catalogColumns) {
+    const table = catalogString(row.table_name, "information_schema.columns.table_name").toLowerCase();
+    const column = catalogString(row.column_name, `${table} information_schema column name`).toLowerCase();
+    const columns = columnsByTable.get(table) ?? new Map<string, PostgresColumnType>();
+    columns.set(column, row);
+    columnsByTable.set(table, columns);
+  }
 
   const missingColumns: string[] = [];
+  const mismatchedTypes: string[] = [];
   for (const model of expectedModels) {
-    const tableName = String(model.getTableName());
-    const columns = await sequelize.getQueryInterface().describeTable(tableName);
+    const tableName = tableNameOf(model, "Sequelize model");
+    const expectedTable = tableName.toLowerCase();
+    const columns = columnsByTable.get(expectedTable) ?? new Map<string, PostgresColumnType>();
     for (const [attribute, definition] of Object.entries(model.rawAttributes)) {
-      const column = definition.field ?? attribute;
-      if (!Object.hasOwn(columns, column)) missingColumns.push(`${tableName}.${column}`);
+      const column = (definition.field ?? attribute).toLowerCase();
+      const actual = columns.get(column);
+      const context = `${tableName}.${column}`;
+      const origin = migrationOrigin(migrationNames, sql, tableName.toLowerCase(), column);
+      if (!actual) {
+        missingColumns.push(`${context} (migration: ${origin})`);
+        continue;
+      }
+      const expectedType = sequelizeTypeSql(definition.type, context);
+      if (!postgresColumnTypeMatches(expectedType, actual)) {
+        mismatchedTypes.push(`${context}: expected Sequelize ${expectedType}, found PostgreSQL ${actual.data_type} (${actual.udt_name}${actual.character_maximum_length ? `, length ${actual.character_maximum_length}` : ""}${actual.numeric_precision !== null ? `, precision ${actual.numeric_precision}, scale ${actual.numeric_scale}` : ""}) (migration: ${origin})`);
+      }
     }
   }
   const ledgerColumns = ["source_system", "source_entity", "source_id", "target_entity", "target_id", "source_checksum", "imported_at", "created_at", "updated_at"];
   if (tables.has("data_migration_ledger")) {
-    const ledger = await sequelize.getQueryInterface().describeTable("data_migration_ledger");
-    for (const column of ledgerColumns) if (!Object.hasOwn(ledger, column)) missingColumns.push(`data_migration_ledger.${column}`);
+    const ledger = columnsByTable.get("data_migration_ledger") ?? new Map<string, PostgresColumnType>();
+    for (const column of ledgerColumns) if (!ledger.has(column)) missingColumns.push(`data_migration_ledger.${column} (migration: 20261030000000-base44-migration-ledger.cjs)`);
   }
   if (missingColumns.length) fail(`Schema verification failed; missing existing columns: ${missingColumns.join(", ")}. No migrations or seeders were run.`);
+  if (mismatchedTypes.length) fail(`Schema verification failed; PostgreSQL column types differ from Sequelize model types: ${mismatchedTypes.join("; ")}. No migrations or seeders were run.`);
 
   const expectedIndexes = new Set<string>();
   const expectedConstraints = new Set<string>();
@@ -109,31 +175,33 @@ const verifySchema = async (migrationNames: string[]) => {
     "SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()",
     { type: QueryTypes.SELECT },
   );
-  const existingIndexes = new Set(indexRows.map((row) => row.indexname.toLowerCase()));
+  const existingIndexes = new Set(indexRows.map((row) => catalogString(row.indexname, "pg_indexes.indexname").toLowerCase()));
   const missingIndexes = [...expectedIndexes].filter((name) => !existingIndexes.has(name));
-  if (missingIndexes.length) fail(`Schema verification failed; missing migration indexes: ${missingIndexes.join(", ")}. No migrations or seeders were run.`);
+  if (missingIndexes.length) fail(`Schema verification failed; missing migration indexes: ${missingIndexes.map((name) => `${name} (migration: ${migrationOrigin(migrationNames, sql, name)})`).join(", ")}. No migrations or seeders were run.`);
   if (expectedConstraints.size) {
     const constraintRows = await sequelize.query<{ conname: string }>(
       "SELECT conname FROM pg_constraint WHERE connamespace = current_schema()::regnamespace",
       { type: QueryTypes.SELECT },
     );
-    const existingConstraints = new Set(constraintRows.map((row) => row.conname.toLowerCase()));
+    const existingConstraints = new Set(constraintRows.map((row) => catalogString(row.conname, "pg_constraint.conname").toLowerCase()));
     const missingConstraints = [...expectedConstraints].filter((name) => !existingConstraints.has(name));
-    if (missingConstraints.length) fail(`Schema verification failed; missing migration constraints: ${missingConstraints.join(", ")}. No migrations or seeders were run.`);
+    if (missingConstraints.length) fail(`Schema verification failed; missing migration constraints: ${missingConstraints.map((name) => `${name} (migration: ${migrationOrigin(migrationNames, sql, name)})`).join(", ")}. No migrations or seeders were run.`);
   }
 
   const constraintRequirements = tableConstraintRequirements(sql);
   if (constraintRequirements.size) {
     const constraintCounts = await sequelize.query<{ table_name: string; contype: string; count: number }>(
-      `SELECT conrelid::regclass::text AS table_name, contype, count(*)::int AS count
-       FROM pg_constraint
-       WHERE connamespace = current_schema()::regnamespace AND contype IN ('c', 'f', 'u')
-       GROUP BY conrelid, contype`,
+      `SELECT relation.relname AS table_name, constraint_row.contype, count(*)::int AS count
+       FROM pg_constraint AS constraint_row
+       JOIN pg_class AS relation ON relation.oid = constraint_row.conrelid
+       JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+       WHERE namespace.nspname = current_schema() AND constraint_row.contype IN ('c', 'f', 'u')
+       GROUP BY relation.relname, constraint_row.contype`,
       { type: QueryTypes.SELECT },
     );
     const actual = new Map<string, { c: number; f: number; u: number }>();
     for (const row of constraintCounts) {
-      const table = row.table_name.split(".").at(-1)!.replaceAll('"', "").toLowerCase();
+      const table = catalogString(row.table_name, "pg_constraint relation name").toLowerCase();
       const counts = actual.get(table) ?? { c: 0, f: 0, u: 0 };
       counts[row.contype as "c" | "f" | "u"] = row.count;
       actual.set(table, counts);
@@ -145,7 +213,7 @@ const verifySchema = async (migrationNames: string[]) => {
         if (present[kind] < required[kind]) missing.push(`${table} (${required[kind] - present[kind]} ${kind} constraint(s))`);
       }
     }
-    if (missing.length) fail(`Schema verification failed; migration table constraints are missing: ${missing.join(", ")}. No migrations or seeders were run.`);
+    if (missing.length) fail(`Schema verification failed; migration table constraints are missing: ${missing.map((item) => `${item} (migration: ${migrationOrigin(migrationNames, sql, item.split(" ")[0]!.toLowerCase())})`).join(", ")}. No migrations or seeders were run.`);
   }
 };
 
