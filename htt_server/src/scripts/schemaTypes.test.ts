@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { postgresColumnTypeMatches, type PostgresColumnType } from "./schemaTypes.js";
+import { catalogString, postgresColumnTypeMatches, readCatalogField, type PostgresColumnType } from "./schemaTypes.js";
 
 const column = (values: Partial<PostgresColumnType>): PostgresColumnType => ({
   data_type: "text",
@@ -33,4 +33,18 @@ test("schema type comparison recognizes timestamp, date, UUID and JSONB", () => 
   assert.equal(postgresColumnTypeMatches("DATE", column({ data_type: "date", udt_name: "date" })), true);
   assert.equal(postgresColumnTypeMatches("UUID", column({ data_type: "uuid", udt_name: "uuid" })), true);
   assert.equal(postgresColumnTypeMatches("JSONB", column({ data_type: "jsonb", udt_name: "jsonb" })), true);
+});
+
+test("catalog field reader handles Sequelize PostgreSQL table-name rows and explicit aliases", () => {
+  assert.equal(readCatalogField(["centres"], ["tableName", "table_name"], "table lookup"), "centres");
+  assert.equal(readCatalogField({ tableName: "centres" }, ["tableName", "table_name"], "table lookup"), "centres");
+  assert.equal(readCatalogField({ table_name: "centres" }, ["tableName", "table_name"], "table lookup"), "centres");
+});
+
+test("catalog failures report returned field names without exposing row values", () => {
+  assert.throws(
+    () => readCatalogField({ unexpected: "private-value" }, ["tableName", "table_name"], "information_schema.tables lookup"),
+    /expected field tableName or table_name; received fields \[unexpected\]/,
+  );
+  assert.throws(() => catalogString(undefined, "information_schema.tables.table_name"), /expected a non-empty string, received undefined/);
 });

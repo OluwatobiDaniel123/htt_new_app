@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { QueryTypes } from "sequelize";
-import { postgresColumnTypeMatches, type PostgresColumnType } from "./schemaTypes.js";
+import { catalogString, postgresColumnTypeMatches, readCatalogField, type PostgresColumnType } from "./schemaTypes.js";
 import { env } from "../config/env.js";
 import { sequelize, models, coachingApprenticeApplication } from "../models/index.js";
 import { seedAdminAccount } from "../services/adminSeedService.js";
@@ -22,13 +22,6 @@ const seeders = [
 
 const fail = (message: string): never => {
   throw new Error(message);
-};
-
-const catalogString = (value: unknown, context: string): string => {
-  if (typeof value !== "string" || !value.trim()) {
-    return fail(`Schema verification failed while reading ${context}: PostgreSQL returned an empty or non-string name.`);
-  }
-  return value;
 };
 
 const tableNameOf = (model: { getTableName: () => unknown }, context: string) => {
@@ -99,11 +92,16 @@ const verifySchema = async (migrationNames: string[]) => {
   const expectedModels = [...Object.values(models), coachingApprenticeApplication];
   for (const model of expectedModels) tables.add(tableNameOf(model, "Sequelize model").toLowerCase());
 
-  const catalogTables = await sequelize.query<{ table_name: string }>(
-    "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'",
-    { type: QueryTypes.SELECT },
+  const catalogTables = await sequelize.query<Record<string, unknown> | unknown[]>(
+    `SELECT tables.table_name AS "tableName"
+     FROM information_schema.tables AS tables
+     WHERE tables.table_schema = current_schema() AND tables.table_type = 'BASE TABLE'`,
+    { type: QueryTypes.SELECT, raw: true },
   );
-  const existingTables = new Set(catalogTables.map((row) => catalogString(row.table_name, "information_schema.tables.table_name").toLowerCase()));
+  const existingTables = new Set(catalogTables.map((row) => catalogString(
+    readCatalogField(row, ["tableName", "table_name"], "information_schema.tables table lookup"),
+    "information_schema.tables.table_name",
+  ).toLowerCase()));
   const missingTables = [...tables].filter((table) => !existingTables.has(table));
   if (missingTables.length) fail(`Schema verification failed; missing existing tables: ${missingTables.map((table) => `${table} (migration: ${migrationOrigin(migrationNames, sql, table)})`).join(", ")}. No migrations or seeders were run.`);
 
@@ -119,7 +117,7 @@ const verifySchema = async (migrationNames: string[]) => {
   }>(
     `SELECT table_name, column_name, data_type, udt_name, character_maximum_length, numeric_precision, numeric_scale
      FROM information_schema.columns WHERE table_schema = current_schema()`,
-    { type: QueryTypes.SELECT },
+    { type: QueryTypes.SELECT, raw: true },
   );
   for (const row of catalogColumns) {
     const table = catalogString(row.table_name, "information_schema.columns.table_name").toLowerCase();
@@ -173,7 +171,7 @@ const verifySchema = async (migrationNames: string[]) => {
   }
   const indexRows = await sequelize.query<{ indexname: string }>(
     "SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()",
-    { type: QueryTypes.SELECT },
+    { type: QueryTypes.SELECT, raw: true },
   );
   const existingIndexes = new Set(indexRows.map((row) => catalogString(row.indexname, "pg_indexes.indexname").toLowerCase()));
   const missingIndexes = [...expectedIndexes].filter((name) => !existingIndexes.has(name));
@@ -181,7 +179,7 @@ const verifySchema = async (migrationNames: string[]) => {
   if (expectedConstraints.size) {
     const constraintRows = await sequelize.query<{ conname: string }>(
       "SELECT conname FROM pg_constraint WHERE connamespace = current_schema()::regnamespace",
-      { type: QueryTypes.SELECT },
+      { type: QueryTypes.SELECT, raw: true },
     );
     const existingConstraints = new Set(constraintRows.map((row) => catalogString(row.conname, "pg_constraint.conname").toLowerCase()));
     const missingConstraints = [...expectedConstraints].filter((name) => !existingConstraints.has(name));
@@ -197,7 +195,7 @@ const verifySchema = async (migrationNames: string[]) => {
        JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
        WHERE namespace.nspname = current_schema() AND constraint_row.contype IN ('c', 'f', 'u')
        GROUP BY relation.relname, constraint_row.contype`,
-      { type: QueryTypes.SELECT },
+      { type: QueryTypes.SELECT, raw: true },
     );
     const actual = new Map<string, { c: number; f: number; u: number }>();
     for (const row of constraintCounts) {
@@ -220,11 +218,11 @@ const verifySchema = async (migrationNames: string[]) => {
 const reconcileMigrationHistory = async (migrationNames: string[]) => {
   const existence = await sequelize.query<{ exists: boolean }>(
     `SELECT to_regclass(format('%I.%I', current_schema(), 'SequelizeMeta')) IS NOT NULL AS exists`,
-    { type: QueryTypes.SELECT },
+    { type: QueryTypes.SELECT, raw: true },
   );
   const metaExists = existence[0]?.exists === true;
   const recorded: string[] = metaExists
-    ? (await sequelize.query<{ name: string }>('SELECT name FROM "SequelizeMeta" ORDER BY name', { type: QueryTypes.SELECT })).map((row) => row.name)
+    ? (await sequelize.query<{ name: string }>('SELECT name FROM "SequelizeMeta" ORDER BY name', { type: QueryTypes.SELECT, raw: true })).map((row) => row.name)
     : [];
   const known = new Set(migrationNames);
   const unknown = recorded.filter((name) => !known.has(name));
@@ -260,10 +258,10 @@ try {
   const migrations = await migrationFiles();
   const seederHistory = await sequelize.query<{ exists: boolean }>(
     `SELECT to_regclass(format('%I.%I', current_schema(), 'SequelizeData')) IS NOT NULL AS exists`,
-    { type: QueryTypes.SELECT },
+      { type: QueryTypes.SELECT, raw: true },
   );
   if (seederHistory[0]?.exists) {
-    const rows = await sequelize.query<{ count: number }>('SELECT count(*)::int AS count FROM "SequelizeData"', { type: QueryTypes.SELECT });
+    const rows = await sequelize.query<{ count: number }>('SELECT count(*)::int AS count FROM "SequelizeData"', { type: QueryTypes.SELECT, raw: true });
     console.info(`Seeder history: SequelizeData exists with ${rows[0]?.count ?? 0} row(s), but this project does not configure Sequelize seeder storage; those rows are not treated as seeder history.`);
   } else {
     console.info("Seeder history: not configured; Sequelize CLI does not persist seeder history.");

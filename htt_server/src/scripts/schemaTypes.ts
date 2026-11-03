@@ -8,6 +8,29 @@ export interface PostgresColumnType {
 
 const lower = (value: string) => value.toLowerCase();
 
+const receivedFields = (row: unknown) => {
+  if (Array.isArray(row)) return `[${row.map((_value, index) => index).join(", ")}]`;
+  if (typeof row === "object" && row !== null) return `[${Object.keys(row).sort().join(", ")}]`;
+  return `[] (row type: ${row === null ? "null" : typeof row})`;
+};
+
+export const readCatalogField = (row: unknown, fieldNames: string[], context: string): unknown => {
+  if (Array.isArray(row) && row.length === 1) return row[0];
+  if (typeof row === "object" && row !== null) {
+    for (const name of fieldNames) {
+      if (Object.hasOwn(row, name)) return Reflect.get(row, name);
+    }
+  }
+  throw new Error(`Schema verification failed for ${context}: expected field ${fieldNames.join(" or ")}; received fields ${receivedFields(row)}.`);
+};
+
+export const catalogString = (value: unknown, context: string): string => {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`Schema verification failed for ${context}: expected a non-empty string, received ${value === null ? "null" : typeof value}.`);
+  }
+  return value;
+};
+
 const numericShapeMatches = (expected: string, column: PostgresColumnType) => {
   const match = expected.match(/^(?:DECIMAL|NUMERIC)(?:\((\d+),(\d+)\))?$/i);
   if (!match || column.data_type !== "numeric") return false;
