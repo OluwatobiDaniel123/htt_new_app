@@ -9,16 +9,34 @@ const envSchema = z.object({
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
+  // FRONTEND_URL: z
+  //   .string()
+  //   .default("http://localhost:5173")
+  //   .transform((value) => value.split(",").map((origin) => origin.trim()))
+  //   .pipe(z.array(z.string().url())),
+  // PUBLIC_SITE_URL: z
+  //   .string()
+  //   .default("")
+  //   .transform((value) => value.split(",").map((origin) => origin.trim()).filter(Boolean))
+  //   .pipe(z.array(z.string().url())),
   FRONTEND_URL: z
     .string()
     .default("http://localhost:5173")
     .transform((value) => value.split(",").map((origin) => origin.trim()))
-    .pipe(z.array(z.string().url())),
+    .pipe(z.array(z.string().url()))
+    .transform((origins) => origins.map((origin) => new URL(origin).origin)),
+
   PUBLIC_SITE_URL: z
     .string()
     .default("")
-    .transform((value) => value.split(",").map((origin) => origin.trim()).filter(Boolean))
-    .pipe(z.array(z.string().url())),
+    .transform((value) =>
+      value
+        .split(",")
+        .map((origin) => origin.trim())
+        .filter(Boolean),
+    )
+    .pipe(z.array(z.string().url()))
+    .transform((origins) => origins.map((origin) => new URL(origin).origin)),
   DATABASE_URL: z.string().optional().default(""),
   PGHOST: z.string().default("localhost"),
   PGPORT: z.coerce.number().int().min(1).max(65535).default(5432),
