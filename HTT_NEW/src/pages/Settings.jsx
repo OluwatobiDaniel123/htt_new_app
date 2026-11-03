@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Save, Loader2, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Save, Loader2 } from "lucide-react";
 import { api, fromUiRecord } from "@/api/client";
 import { useAppConfig } from "@/lib/AppConfigContext";
 import { useToast } from "@/components/ui/use-toast";
@@ -25,8 +25,6 @@ const DEFAULTS = {
   registration_prefix: "HTT-REG",
   player_id_prefix: "HTT-P",
   retention_years: 7,
-  payment_provider: "paystack",
-  paystack_configured: false,
   league_status: "planned",
   school_project_status: "proposed",
   scholarship_target: 20,
@@ -58,7 +56,6 @@ export default function Settings() {
         registration_prefix: values.registration_prefix,
         player_id_prefix: values.player_id_prefix,
         retention_years: Number(values.retention_years || 7),
-        payment_provider: values.payment_provider,
         league_status: values.league_status,
         school_project_status: values.school_project_status,
         scholarship_target: Number(values.scholarship_target || 20),
@@ -181,63 +178,6 @@ export default function Settings() {
           </p>
         </section>
 
-        <section className="htt-surface p-4">
-          <h2 className="mb-3 text-[13px] font-semibold">Payment processing</h2>
-          {values.paystack_configured ? (
-            <p className="flex items-start gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-[12px] text-emerald-800">
-              <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              Marked as configured. Card payments are initiated and verified
-              server-side through Paystack.
-            </p>
-          ) : (
-            <p className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
-              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              Payment processing is <strong>not yet configured</strong>. No
-              payment is simulated — manual payments can still be recorded and
-              reconciled.
-            </p>
-          )}
-
-          <label className="mt-3 flex items-start gap-2.5 rounded-lg border border-border/80 px-3 py-2.5">
-            <input
-              type="checkbox"
-              checked={!!values.paystack_configured}
-              readOnly
-              disabled
-              className="mt-0.5 h-4 w-4 rounded border-border accent-[#0B3A2A]"
-            />
-            <span className="text-[12px] leading-snug text-foreground/85">
-              Paystack keys detected by the backend
-              <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                Set PAYSTACK_SECRET_KEY in the backend environment; this status is detected automatically.
-              </span>
-            </span>
-          </label>
-
-          <div className="mt-4 space-y-1.5">
-            <p className="htt-label">Webhook endpoint</p>
-            <p className="rounded-md bg-muted/60 px-2 py-1.5 font-mono text-[11px] text-foreground/80">
-              /api/v1/payments/webhook/paystack
-            </p>
-            <p className="text-[11px] text-muted-foreground">
-              Add this path to your app's published domain in the Paystack
-              dashboard. Requests are verified by signature and duplicate events
-              are ignored.
-            </p>
-          </div>
-
-          <div className="mt-4 space-y-1.5">
-            <p className="htt-label">Public website API</p>
-            <p className="rounded-md bg-muted/60 px-2 py-1.5 font-mono text-[11px] text-foreground/80">
-              /api/v1/public/intake
-            </p>
-            <p className="text-[11px] text-muted-foreground">
-              Actions: reference_data · submit_registration · submit_enquiry ·
-              submit_scholarship · submit_sponsorship. Rate limited; internal
-              notes and private records are never returned.
-            </p>
-          </div>
-        </section>
       </div>
 
       <section className="htt-surface mt-4 p-4">

@@ -38,12 +38,18 @@ const numericShapeMatches = (expected: string, column: PostgresColumnType) => {
   return Number(column.numeric_precision) === Number(match[1]) && Number(column.numeric_scale) === Number(match[2]);
 };
 
-const characterShapeMatches = (expected: string, column: PostgresColumnType) => {
+const characterShapeMatches = (
+  expected: string,
+  column: PostgresColumnType,
+  allowWiderLength: boolean,
+) => {
   const match = expected.match(/^(VARCHAR|CHAR|CHARACTER VARYING|CHARACTER)(?:\((\d+)\))?$/i);
   if (!match) return false;
   if (!["character varying", "character"].includes(column.data_type)) return false;
   if (!match[2]) return true;
-  return Number(column.character_maximum_length) === Number(match[2]);
+  return allowWiderLength
+    ? Number(column.character_maximum_length) >= Number(match[2])
+    : Number(column.character_maximum_length) === Number(match[2]);
 };
 
 const arrayElementMatches = (elementSql: string, udtName: string) => {
@@ -60,12 +66,16 @@ const arrayElementMatches = (elementSql: string, udtName: string) => {
 };
 
 /** Compare Sequelize's PostgreSQL SQL type with information_schema's portable type fields. */
-export const postgresColumnTypeMatches = (sequelizeSqlType: string, column: PostgresColumnType): boolean => {
+export const postgresColumnTypeMatches = (
+  sequelizeSqlType: string,
+  column: PostgresColumnType,
+  options: { allowWiderCharacterLength?: boolean } = {},
+): boolean => {
   const expected = sequelizeSqlType.trim().replace(/\s+/g, " ").toUpperCase();
   const actual = lower(column.data_type);
   const array = expected.match(/^(.*)\[\]$/);
   if (array) return actual === "array" && arrayElementMatches(array[1]!, column.udt_name);
-  if (characterShapeMatches(expected, column)) return true;
+  if (characterShapeMatches(expected, column, options.allowWiderCharacterLength === true)) return true;
   if (numericShapeMatches(expected, column)) return true;
 
   const expectedDataType: Record<string, string[]> = {

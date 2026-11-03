@@ -35,11 +35,6 @@ import ActiveScholarships from "@/pages/ActiveScholarships";
 import Sponsors from "@/pages/Sponsors";
 import SponsorshipEnquiries from "@/pages/SponsorshipEnquiries";
 import FundingOverview from "@/pages/FundingOverview";
-import Payments from "@/pages/Payments";
-import OutstandingBalances from "@/pages/OutstandingBalances";
-import Transactions from "@/pages/Transactions";
-import Receipts from "@/pages/Receipts";
-import FinancialReports from "@/pages/FinancialReports";
 import Seasons from "@/pages/Seasons";
 import Teams from "@/pages/Teams";
 import Fixtures from "@/pages/Fixtures";
@@ -120,12 +115,6 @@ const AuthenticatedApp = () => {
             element={<SponsorshipEnquiries />}
           />
           <Route path="/funding" element={<FundingOverview />} />
-
-          <Route path="/payments" element={<Payments />} />
-          <Route path="/outstanding" element={<OutstandingBalances />} />
-          <Route path="/transactions" element={<Transactions />} />
-          <Route path="/receipts" element={<Receipts />} />
-          <Route path="/financial-reports" element={<FinancialReports />} />
 
           <Route path="/seasons" element={<Seasons />} />
           <Route path="/teams" element={<Teams />} />

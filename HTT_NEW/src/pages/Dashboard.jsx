@@ -19,8 +19,6 @@ const defaultMetrics = {
   upcomingAssessments: 0,
   activeScholarships: 0,
   pendingScholarships: 0,
-  paymentsReceived: 0,
-  outstandingBalances: 0,
   fundingReceived: 0,
   fundingRequired: 0,
   openEnquiries: 0,
@@ -52,7 +50,6 @@ export default function Dashboard() {
   const [recentRegs, setRecentRegs] = useState([]);
   const [playersByCentre, setPlayersByCentre] = useState([]);
   const [pipeline, setPipeline] = useState([]);
-  const [paymentsByStatus, setPaymentsByStatus] = useState([]);
   const [activity, setActivity] = useState([]);
   const [assessments, setAssessments] = useState([]);
   const [tasks, setTasks] = useState([]);
@@ -67,7 +64,6 @@ export default function Dashboard() {
         setRecentRegs((result.recentRegistrations || []).map(toUiRecord));
         setPlayersByCentre((result.playersByCentre || []).map(toUiRecord));
         setPipeline((result.pipeline || []).map(toUiRecord));
-        setPaymentsByStatus((result.paymentsByStatus || []).map(toUiRecord));
         setAssessments((result.assessments || []).map(toUiRecord));
         setTasks((result.tasks || []).map(toUiRecord));
         setActivity(can("audit") ? (result.activity || []).map(toUiRecord) : []);
@@ -107,13 +103,6 @@ export default function Dashboard() {
     [pipeline],
   );
 
-  const collectionSeries = useMemo(
-    () =>
-      paymentsByStatus
-        .filter((r) => r.status)
-        .map((r) => ({ label: labelize(r.status), amount: r.sum_amount || 0 })),
-    [paymentsByStatus],
-  );
 
   const hour = new Date().getHours();
   const greeting =
@@ -124,7 +113,7 @@ export default function Dashboard() {
       <PageHeader
         eyebrow="HTT Academy Nigeria"
         title={`${greeting}${user?.full_name ? `, ${user.full_name.split(" ")[0]}` : ""}`}
-        description="Live operational picture across registrations, centres, scholarships, finance and sponsorship."
+        description="Live operational picture across registrations, centres, scholarships and sponsorship."
       />
       <MetricGrid metrics={metrics} loading={loading} />
       <div className="mt-4">
@@ -132,7 +121,6 @@ export default function Dashboard() {
           trend={trend}
           distribution={distribution}
           pipeline={pipelineSeries}
-          collections={collectionSeries}
         />
       </div>
       <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">

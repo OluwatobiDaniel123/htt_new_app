@@ -11,10 +11,30 @@ import { seedAdminAccount } from "../services/adminSeedService.js";
 const migrationDirectory = resolve(process.cwd(), "migrations");
 const seederDirectory = resolve(process.cwd(), "seeders");
 const require = createRequire(import.meta.url);
+const paymentTables = new Set(["payments", "payment_allocations", "payment_events", "refunds"]);
+const paymentIndexes = new Set([
+  "idx_payments_status_created",
+  "idx_payments_player",
+  "idx_payment_allocations_registration",
+  "idx_payment_events_payment",
+  "idx_payments_registration_created",
+  "idx_payments_programme_centre_created",
+  "idx_payments_paid_at",
+  "idx_refunds_payment_status",
+  "idx_refunds_created",
+]);
+const deferredPaymentMigrations = new Set([
+  "20261029000000-create-initial-schema.cjs",
+  "20261029000003-phase5-finance.cjs",
+  "20261104000000-reconcile-production-payment-and-player-types.cjs",
+]);
+const paymentOnlySchemaMigrations = new Set([
+  "20261029000003-phase5-finance.cjs",
+  "20261104000000-reconcile-production-payment-and-player-types.cjs",
+]);
 const seeders = [
   "20261029000000-seed-rbac.cjs",
   "20261029000001-phase4-academy-permissions.cjs",
-  "20261029000002-phase5-finance-permissions.cjs",
   "20261029000003-phase6-notification-permissions.cjs",
   "20261030000000-phase7-safeguarding-permissions.cjs",
   "20261102000000-coaching-apprentice-permission.cjs",
@@ -67,6 +87,7 @@ const requiredTables = (migrationNames: string[], migrationSql: string[]) => {
     }
   }
   if (migrationNames.includes("20261030000000-base44-migration-ledger.cjs")) tables.add("data_migration_ledger");
+  for (const table of paymentTables) tables.delete(table);
   return tables;
 };
 
@@ -75,6 +96,7 @@ const tableConstraintRequirements = (migrationSql: string[]) => {
   for (const text of migrationSql) {
     for (const match of text.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["']?([a-z_][a-z0-9_]*)\s*\(([\s\S]*?)\)\s*;/gi)) {
       const table = match[1]!.toLowerCase();
+      if (paymentTables.has(table)) continue;
       const body = match[2]!;
       requirements.set(table, {
         c: [...body.matchAll(/\bCHECK\s*\(/gi)].length,
@@ -89,7 +111,8 @@ const tableConstraintRequirements = (migrationSql: string[]) => {
 const verifySchema = async (migrationNames: string[]) => {
   const sql = await Promise.all(migrationNames.map((name) => readFile(resolve(migrationDirectory, name), "utf8")));
   const tables = requiredTables(migrationNames, sql);
-  const expectedModels = [...Object.values(models), coachingApprenticeApplication];
+  const expectedModels = [...Object.values(models), coachingApprenticeApplication]
+    .filter((model) => !paymentTables.has(tableNameOf(model, "Sequelize model").toLowerCase()));
   for (const model of expectedModels) tables.add(tableNameOf(model, "Sequelize model").toLowerCase());
 
   const catalogTables = await sequelize.query<Record<string, unknown> | unknown[]>(
@@ -143,7 +166,8 @@ const verifySchema = async (migrationNames: string[]) => {
         continue;
       }
       const expectedType = sequelizeTypeSql(definition.type, context);
-      if (!postgresColumnTypeMatches(expectedType, actual)) {
+      const allowWiderSchoolColumn = expectedTable === "players" && column === "school";
+      if (!postgresColumnTypeMatches(expectedType, actual, { allowWiderCharacterLength: allowWiderSchoolColumn })) {
         mismatchedTypes.push(`${context}: expected Sequelize ${expectedType}, found PostgreSQL ${actual.data_type} (${actual.udt_name}${actual.character_maximum_length ? `, length ${actual.character_maximum_length}` : ""}${actual.numeric_precision !== null ? `, precision ${actual.numeric_precision}, scale ${actual.numeric_scale}` : ""}) (migration: ${origin})`);
       }
     }
@@ -158,9 +182,11 @@ const verifySchema = async (migrationNames: string[]) => {
 
   const expectedIndexes = new Set<string>();
   const expectedConstraints = new Set<string>();
-  for (const text of sql) {
+  for (const [index, text] of sql.entries()) {
+    if (paymentOnlySchemaMigrations.has(migrationNames[index]!)) continue;
     for (const match of text.matchAll(/CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?["']?([a-z_][a-z0-9_]*)/gi)) {
-      expectedIndexes.add(match[1]!.toLowerCase());
+      const name = match[1]!.toLowerCase();
+      if (!paymentIndexes.has(name)) expectedIndexes.add(name);
     }
     for (const match of text.matchAll(/ADD\s+CONSTRAINT\s+["']?([a-z_][a-z0-9_]*)/gi)) {
       expectedConstraints.add(match[1]!.toLowerCase());
@@ -229,17 +255,22 @@ const reconcileMigrationHistory = async (migrationNames: string[]) => {
   if (unknown.length) fail(`SequelizeMeta contains migration names absent from this deploy: ${unknown.join(", ")}. No migration history was changed.`);
 
   const missing = migrationNames.filter((name) => !recorded.includes(name));
-  console.info(`Migration history: ${metaExists ? `${recorded.length} recorded` : "SequelizeMeta is absent"}; ${missing.length} file(s) require schema reconciliation.`);
-  if (!missing.length) return;
-
+  const deferred = migrationNames.filter((name) => deferredPaymentMigrations.has(name));
+  console.info(`Migration history: ${metaExists ? `${recorded.length} recorded` : "SequelizeMeta is absent"}; ${missing.length} file(s) are unrecorded.`);
   await verifySchema(migrationNames);
+  const missingDeferred = deferred.filter((name) => missing.includes(name));
+  if (missingDeferred.length) {
+    console.info(`Migration history was left unchanged because payment-related schema is deferred: ${missingDeferred.join(", ")}. No migration files were marked complete.`);
+    return;
+  }
+  if (!missing.length) return;
   if (!metaExists) {
     await sequelize.query('CREATE TABLE "SequelizeMeta" ("name" varchar(255) NOT NULL PRIMARY KEY)');
   }
   for (const name of missing) {
     await sequelize.query('INSERT INTO "SequelizeMeta" ("name") VALUES (:name) ON CONFLICT ("name") DO NOTHING', { replacements: { name } });
   }
-  console.info(`Schema postconditions verified for ${migrationNames.length} migration files; missing SequelizeMeta entries were reconciled. Migration up functions were not executed.`);
+  console.info(`Schema postconditions verified for ${missing.length} migration files; missing SequelizeMeta entries were reconciled. Migration up functions were not executed.`);
 };
 
 const runSeeders = async () => {
@@ -256,6 +287,8 @@ try {
   assertProductionConfiguration();
   await sequelize.authenticate();
   const migrations = await migrationFiles();
+  console.info(`Payment processing is disabled. Deferred migrations remain available for later: ${[...deferredPaymentMigrations].join(", ")}.`);
+  console.info("Payment permission seeding is deferred until payment processing is re-enabled.");
   const seederHistory = await sequelize.query<{ exists: boolean }>(
     `SELECT to_regclass(format('%I.%I', current_schema(), 'SequelizeData')) IS NOT NULL AS exists`,
       { type: QueryTypes.SELECT, raw: true },

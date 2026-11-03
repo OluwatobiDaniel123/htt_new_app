@@ -13,6 +13,9 @@ const column = (values: Partial<PostgresColumnType>): PostgresColumnType => ({
 
 test("schema type comparison accepts Sequelize string types and PostgreSQL char aliases", () => {
   assert.equal(postgresColumnTypeMatches("VARCHAR(180)", column({ data_type: "character varying", udt_name: "varchar", character_maximum_length: 180 })), true);
+  const widerColumn = column({ data_type: "character varying", udt_name: "varchar", character_maximum_length: 255 });
+  assert.equal(postgresColumnTypeMatches("VARCHAR(180)", widerColumn), false);
+  assert.equal(postgresColumnTypeMatches("VARCHAR(180)", widerColumn, { allowWiderCharacterLength: true }), true);
   assert.equal(postgresColumnTypeMatches("VARCHAR(3)", column({ data_type: "character", udt_name: "bpchar", character_maximum_length: 3 })), true);
   assert.equal(postgresColumnTypeMatches("VARCHAR(180)", column({ data_type: "character varying", character_maximum_length: 160 })), false);
 });

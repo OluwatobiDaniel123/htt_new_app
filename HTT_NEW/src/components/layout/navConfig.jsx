@@ -11,10 +11,6 @@ import {
   BadgeCheck,
   HeartHandshake,
   HandCoins,
-  Wallet,
-  AlertCircle,
-  ArrowLeftRight,
-  Receipt,
   TrendingUp,
   Shield,
   CalendarDays,
@@ -60,16 +56,6 @@ export const NAV_GROUPS = [
       { label: 'Sponsors', to: '/sponsors', icon: HeartHandshake, module: 'funding' },
       { label: 'Sponsorship Enquiries', to: '/sponsorship-enquiries', icon: HandCoins, module: 'funding' },
       { label: 'Funding Overview', to: '/funding', icon: TrendingUp, module: 'funding' },
-    ],
-  },
-  {
-    label: 'Finance',
-    items: [
-      { label: 'Payments', to: '/payments', icon: Wallet, module: 'finance' },
-      { label: 'Outstanding Balances', to: '/outstanding', icon: AlertCircle, module: 'finance' },
-      { label: 'Transactions', to: '/transactions', icon: ArrowLeftRight, module: 'finance' },
-      { label: 'Receipts', to: '/receipts', icon: Receipt, module: 'finance' },
-      { label: 'Financial Reports', to: '/financial-reports', icon: BarChart3, module: 'finance' },
     ],
   },
   {

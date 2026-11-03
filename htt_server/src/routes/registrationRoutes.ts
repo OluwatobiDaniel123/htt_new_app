@@ -18,13 +18,6 @@ import {
 export const registrationRoutes = Router();
 registrationRoutes.use(authenticate);
 registrationRoutes.get(
-  "/balances",
-  requirePermission("registrations.read"),
-  requirePermission("payments.read"),
-  validateQuery(registrationListQuery),
-  registrations.listRegistrationBalances,
-);
-registrationRoutes.get(
   "/",
   requirePermission("registrations.read"),
   validateQuery(registrationListQuery),
@@ -35,13 +28,6 @@ registrationRoutes.post(
   requirePermission("registrations.create", "full"),
   validateBody(registrationBody),
   registrations.createRegistration,
-);
-registrationRoutes.get(
-  "/:id/balance",
-  uuidParam(),
-  requirePermission("registrations.read"),
-  requirePermission("payments.read"),
-  registrations.registrationBalance,
 );
 registrationRoutes.get(
   "/:id",

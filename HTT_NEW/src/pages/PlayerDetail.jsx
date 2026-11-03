@@ -4,7 +4,7 @@ import { ArrowLeft, Loader2, Pencil, ClipboardCheck, Users, CalendarCheck } from
 import { getResource, saveResource } from '@/api/resources';
 import { useAppConfig } from '@/lib/AppConfigContext';
 import { useToast } from '@/components/ui/use-toast';
-import { ageFromDob, currency, formatDate, initials, labelize } from '@/lib/constants';
+import { ageFromDob, formatDate, initials, labelize } from '@/lib/constants';
 import PageHeader from '@/components/common/PageHeader';
 import StatusBadge from '@/components/common/StatusBadge';
 import DetailField, { DetailGrid, SectionCard } from '@/components/common/DetailField';
@@ -40,7 +40,6 @@ export default function PlayerDetail() {
   const assessments = useCollection('Assessment', { player_id: id }, { sort: '-scheduled_at', limit: 20 });
   const attendance = useCollection('AttendanceRecord', { player_id: id }, { sort: '-session_date', limit: 20 });
   const links = useCollection('GuardianLink', { player_id: id }, { limit: 10 });
-  const payments = useCollection('Payment', { player_id: id }, { sort: '-paid_at', limit: 10 });
 
   const load = async () => {
     try {
@@ -261,23 +260,6 @@ export default function PlayerDetail() {
             )}
           </SectionCard>
 
-          <SectionCard title="Payments">
-            {payments.items.length === 0 ? (
-              <p className="text-[12.5px] text-muted-foreground">No payments recorded.</p>
-            ) : (
-              <ul className="divide-y divide-border/60">
-                {payments.items.map((p) => (
-                  <li key={p.id} className="flex items-center justify-between gap-2 py-2">
-                    <div>
-                      <p className="text-[12.5px]">{currency(p.amount)}</p>
-                      <p className="text-[11px] text-muted-foreground">{formatDate(p.paid_at || p.created_date)}</p>
-                    </div>
-                    <StatusBadge value={p.status} />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </SectionCard>
 
           {player.safeguarding_notes ? (
             <SectionCard title="Safeguarding notes" description="Restricted — management and safeguarding leads only.">

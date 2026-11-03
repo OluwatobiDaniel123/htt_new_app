@@ -6,7 +6,6 @@ import {
   XCircle,
   FileText,
   Loader2,
-  Wallet,
   Clock,
 } from "lucide-react";
 import { api } from "@/api/client";
@@ -25,7 +24,6 @@ import DetailField, {
   DetailGrid,
   SectionCard,
 } from "@/components/common/DetailField";
-import FormDialog from "@/components/common/FormDialog";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
 import AccessDenied from "@/components/common/AccessDenied";
 import { Button } from "@/components/ui/button";
@@ -62,13 +60,11 @@ export default function RegistrationDetail() {
   const [existingPlayerId, setExistingPlayerId] = useState('');
   const [confirmNewPlayer, setConfirmNewPlayer] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [payOpen, setPayOpen] = useState(false);
 
   const load = async () => {
     try {
       const res = await getResource('Registration', id);
-      const balanceData = await api.get(`/registrations/${id}/balance`).catch(() => null);
-      const recordData = { ...res, amount_paid: balanceData ? balanceData.amountPaid : null, payment_details: balanceData?.payments || [] };
+      const recordData = res;
       setRecord(recordData);
       setNotes(recordData.internal_notes || "");
     } catch {
@@ -105,7 +101,6 @@ export default function RegistrationDetail() {
   }
 
   const manage = can("registrations", "full");
-  const canManagePayments = can('finance', 'full');
   const linked = !!record.linked_player_id;
 
   const applyStatus = async (status, note) => {
@@ -173,10 +168,6 @@ export default function RegistrationDetail() {
     await api.put(`/registrations/${record.id}/documents`, { documents });
     await load();
   };
-  const outstanding = record.amount_paid === null
-    ? null
-    : Number(record.amount_due || 0) - Number(record.amount_paid || 0);
-
   return (
     <div>
       <Link
@@ -352,14 +343,6 @@ export default function RegistrationDetail() {
                 label="Amount due"
                 value={currency(record.amount_due)}
               />
-              <DetailField
-                label="Paid to date"
-                value={record.amount_paid === null ? 'Not available' : currency(record.amount_paid)}
-              />
-              <DetailField
-                label="Outstanding"
-                value={outstanding === null ? 'Not available' : outstanding > 0 ? currency(outstanding) : "Settled"}
-              />
               {linked ? (
                 <Link
                   to={`/players/${record.linked_player_id}`}
@@ -395,20 +378,6 @@ export default function RegistrationDetail() {
             </ul>
           </SectionCard>
 
-          {canManagePayments && outstanding !== null && outstanding > 0 ? (
-            <SectionCard title="Payment">
-              <p className="text-[12.5px] text-muted-foreground">
-                {currency(outstanding)} outstanding on this registration.
-              </p>
-              <Button
-                size="sm"
-                className="mt-2 h-8 w-full gap-1.5 text-[12px]"
-                onClick={() => setPayOpen(true)}
-              >
-                <Wallet className="h-3.5 w-3.5" /> Record payment
-              </Button>
-            </SectionCard>
-          ) : null}
 
           <SectionCard title="Status history">
             {(record.status_history || []).length === 0 ? (
@@ -506,58 +475,6 @@ export default function RegistrationDetail() {
         onConfirm={handleApprove}
       />
 
-      <FormDialog
-        open={payOpen}
-        onOpenChange={setPayOpen}
-        title="Record a payment"
-        description="Amounts are validated on the server against this registration."
-        fields={[
-          {
-            name: "amount",
-            label: "Amount (₦)",
-            type: "money",
-            required: true,
-          },
-          {
-            name: "method",
-            label: "Payment method",
-            type: "select",
-            options: ["bank_transfer", "cash", "pos"].map(
-              (v) => ({ value: v, label: labelize(v) }),
-            ),
-            defaultValue: "bank_transfer",
-          },
-          {
-            name: "paidAt",
-            label: "Payment date",
-            type: "date",
-            defaultValue: new Date().toISOString().slice(0, 10),
-          },
-          {
-            name: "notes",
-            label: "Notes",
-            type: "textarea",
-            colSpan: 2,
-            rows: 2,
-          },
-        ]}
-        initial={{ amount: outstanding !== null && outstanding > 0 ? outstanding : "" }}
-        submitLabel="Record payment"
-        onSubmit={async (values) => {
-          await api.post('/payments/manual', {
-            registrationId: record.id,
-            payerName: record.guardian_name,
-            amount: Number(values.amount),
-            method: values.method,
-            paidAt: new Date(`${values.paidAt}T12:00:00.000Z`).toISOString(),
-            notes: values.notes,
-            purpose: "registration",
-            idempotencyKey: crypto.randomUUID(),
-          });
-          toast({ title: "Payment recorded" });
-          await load();
-        }}
-      />
     </div>
   );
 }

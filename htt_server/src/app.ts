@@ -23,7 +23,6 @@ import {
 import { registrationRoutes } from "./routes/registrationRoutes.js";
 import { centreRoutes } from "./routes/centreRoutes.js";
 import { programmeRoutes } from "./routes/programmeRoutes.js";
-import { paymentRoutes } from "./routes/paymentRoutes.js";
 import { notificationRoutes } from "./routes/notificationRoutes.js";
 import { notificationAdminRoutes } from "./routes/notificationAdminRoutes.js";
 import { adminResourceRoutes } from "./routes/adminResourceRoutes.js";
@@ -95,7 +94,15 @@ app.use("/api/v1/players/:id/guardians", playerGuardianRoutes);
 app.use("/api/v1/registrations", registrationRoutes);
 app.use("/api/v1/centres", centreRoutes);
 app.use("/api/v1/programmes", programmeRoutes);
-app.use("/api/v1/payments", paymentRoutes);
+app.use("/api/v1/payments", (_req, res) =>
+  res.status(503).json({
+    success: false,
+    error: {
+      code: "FEATURE_DISABLED",
+      message: "Payment processing is temporarily unavailable.",
+    },
+  }),
+);
 app.use("/api/v1/notifications", notificationRoutes);
 app.use("/api/v1/admin/notifications", notificationAdminRoutes);
 app.use("/api/v1", adminResourceRoutes);

@@ -370,17 +370,6 @@ test("Swagger declares auth, academy, and finance routes", () => {
     "/programmes",
     "/programmes/{id}",
     "/programmes/{id}/status",
-    "/payments",
-    "/payments/{id}",
-    "/payments/initialize",
-    "/payments/verify/{reference}",
-    "/payments/manual",
-    "/payments/webhook/paystack",
-    "/payments/reports/summary",
-    "/payments/{id}/receipt",
-    "/payments/{id}/refunds",
-    "/payments/refunds/{refundId}/approve",
-    "/payments/refunds/{refundId}/confirm-manual",
     "/notifications",
     "/notifications/unread-count",
     "/notifications/{id}",
@@ -415,10 +404,28 @@ test("Swagger declares auth, academy, and finance routes", () => {
     "/dashboard/summary",
     "/reports/academy",
     "/audit-logs",
-    "/registrations/balances",
-    "/registrations/{id}/balance",
   ]) {
     assert.ok(paths[path], `missing OpenAPI path ${path}`);
+  }
+  assert.equal(paths["/payments/initialize"], undefined);
+  assert.equal(paths["/payments/manual"], undefined);
+  assert.equal(paths["/registrations/{id}/balance"], undefined);
+});
+
+test("payment endpoints are temporarily disabled", async (context) => {
+  const server = app.listen(0);
+  context.after(() => new Promise<void>((resolve, reject) =>
+    server.close((error) => error ? reject(error) : resolve()),
+  ));
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = `http://127.0.0.1:${address.port}/api/v1/payments`;
+  for (const [path, method] of [["", "GET"], ["/initialize", "POST"], ["/manual", "POST"], ["/verify/reference", "POST"], ["/refunds/id/approve", "POST"], ["/webhook/paystack", "POST"]]) {
+    const response = await fetch(`${base}${path}`, { method });
+    assert.equal(response.status, 503, `${method} ${path} must be disabled`);
+    const payload = await response.json() as { error?: { code?: string } };
+    assert.equal(payload.error?.code, "FEATURE_DISABLED");
   }
 });
 
@@ -1162,10 +1169,11 @@ test("health responds and protected auth endpoints reject anonymous requests", a
   assert.equal(health.status, 200);
   const swagger = await fetch(`${base}/api-docs/swagger.json`);
   assert.equal(swagger.status, 200);
-  assert.ok(
+  assert.equal(
     ((await swagger.json()) as { paths: Record<string, unknown> }).paths[
       "/payments/webhook/paystack"
     ],
+    undefined,
   );
   const me = await fetch(`${base}/api/v1/auth/me`);
   assert.equal(me.status, 401);
@@ -1175,8 +1183,6 @@ test("health responds and protected auth endpoints reject anonymous requests", a
     "/api/v1/registrations",
     "/api/v1/centres",
     "/api/v1/programmes",
-    "/api/v1/payments",
-    "/api/v1/payments/manual",
     "/api/v1/notifications",
     "/api/v1/notifications/preferences",
     "/api/v1/admin/notifications/deliveries",
@@ -1198,7 +1204,6 @@ test("health responds and protected auth endpoints reject anonymous requests", a
     "/api/v1/dashboard/summary",
     "/api/v1/reports/academy",
     "/api/v1/audit-logs",
-    "/api/v1/registrations/balances",
   ]) {
     assert.equal(
       (await fetch(`${base}${path}`)).status,

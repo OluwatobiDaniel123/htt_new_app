@@ -1681,6 +1681,17 @@ Object.assign(swaggerDocument.components.schemas, {
   },
 });
 
+for (const path of Object.keys(swaggerDocument.paths)) {
+  if (
+    path === "/payments" ||
+    path.startsWith("/payments/") ||
+    path === "/registrations/balances" ||
+    path === "/registrations/{id}/balance"
+  ) {
+    delete swaggerDocument.paths[path];
+  }
+}
+
 Object.assign(swaggerDocument.paths, {
   "/notifications": {
     get: {

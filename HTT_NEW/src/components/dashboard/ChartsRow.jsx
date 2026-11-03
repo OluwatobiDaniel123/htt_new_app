@@ -29,7 +29,7 @@ const tooltipStyle = {
   boxShadow: '0 6px 20px rgba(15,35,64,0.08)',
 };
 
-export default function ChartsRow({ trend, distribution, pipeline, collections }) {
+export default function ChartsRow({ trend, distribution, pipeline }) {
   return (
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
       <ChartPanel title="Registration trend" description="Records created over the last 6 months">
@@ -95,24 +95,6 @@ export default function ChartsRow({ trend, distribution, pipeline, collections }
         )}
       </ChartPanel>
 
-      <ChartPanel title="Financial collections" description="Payment value by status">
-        {collections.length === 0 ? (
-          <Empty />
-        ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={collections} margin={{ top: 6, right: 12, left: -8, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" vertical={false} />
-              <XAxis dataKey="label" {...axisProps} />
-              <YAxis {...axisProps} tickFormatter={(v) => (v >= 1000 ? `${v / 1000}k` : v)} />
-              <Tooltip
-                contentStyle={tooltipStyle}
-                formatter={(v) => [`₦${Number(v).toLocaleString()}`, 'Amount']}
-              />
-              <Bar dataKey="amount" fill="#C2A24C" radius={[4, 4, 0, 0]} maxBarSize={38} />
-            </BarChart>
-          </ResponsiveContainer>
-        )}
-      </ChartPanel>
     </div>
   );
 }
