@@ -101,8 +101,9 @@ export async function seedAdminAccount(
         'The existing "admin" role is missing. Run the existing database migrations and RBAC seeders against this development/test database first.',
       );
 
-    const allPermissions = (await models.Permission.findAll({
+    const requiredPermissions = (await models.Permission.findAll({
       attributes: ["key"],
+      where: { key: requiredAdminPermissions },
       transaction,
     })) as unknown as Array<{ key: string }>;
     const grants = new Map(
@@ -111,17 +112,13 @@ export async function seedAdminAccount(
         permission.RolePermission?.accessLevel,
       ]),
     );
-    const missing = [
-      ...requiredAdminPermissions.filter((key) => grants.get(key) !== "full"),
-      ...allPermissions
-        .map((permission) => permission.key)
-        .filter((key) => grants.get(key) !== "full"),
-    ];
-    if (allPermissions.length === 0 || missing.length > 0) {
+    const existingRequiredKeys = new Set(requiredPermissions.map((permission) => permission.key));
+    const missing = requiredAdminPermissions.filter(
+      (key) => !existingRequiredKeys.has(key) || grants.get(key) !== "full",
+    );
+    if (missing.length > 0) {
       const missingKeys = [...new Set(missing)].join(", ");
-      throw new AdminSeedError(
-        `The existing admin role is missing full required permissions${missingKeys ? `: ${missingKeys}` : "."} Run the existing RBAC permission seeders on this development/test database; this script will not alter role permissions.`,
-      );
+      throw new AdminSeedError(`The existing admin role is missing full required permissions: ${missingKeys}. Run the existing RBAC permission seeders; this script will not alter role permissions.`);
     }
 
     const existing = (await models.StaffAccount.findOne({
