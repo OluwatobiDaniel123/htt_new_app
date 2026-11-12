@@ -33,12 +33,32 @@ const reportFailure = (error: unknown) => {
 };
 
 try {
-  if (env.NODE_ENV === "production") {
-    throw new AdminSeedError("Refusing to seed an administrator when NODE_ENV=production.");
-  }
-  if ((target !== "development" && target !== "test") || target !== env.NODE_ENV) {
+  // if (env.NODE_ENV === "production") {
+  //   throw new AdminSeedError("Refusing to seed an administrator when NODE_ENV=production.");
+  // }
+  // if ((target !== "development" && target !== "test") || target !== env.NODE_ENV) {
+  //   throw new AdminSeedError(
+  //     "Confirm the isolated database target with --target=development or --target=test matching NODE_ENV.",
+  //   );
+  // }
+  const allowProductionSeed =
+    process.env.ALLOW_PRODUCTION_ADMIN_SEED === "true";
+
+  if (env.NODE_ENV === "production" && !allowProductionSeed) {
     throw new AdminSeedError(
-      "Confirm the isolated database target with --target=development or --target=test matching NODE_ENV.",
+      "Production admin seeding requires explicit authorization.",
+    );
+  }
+
+  const validTarget =
+    env.NODE_ENV === "production"
+      ? target === "production" && allowProductionSeed
+      : (target === "development" || target === "test") &&
+        target === env.NODE_ENV;
+
+  if (!validTarget) {
+    throw new AdminSeedError(
+      "The requested seed target does not match NODE_ENV.",
     );
   }
   if (!env.SEED_ADMIN_NAME || !env.SEED_ADMIN_EMAIL || !env.SEED_ADMIN_PASSWORD) {
