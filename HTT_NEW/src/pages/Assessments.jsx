@@ -83,8 +83,12 @@ export default function Assessments() {
   const transform = (values) => {
     const player = players.items.find((p) => p.id === values.player_id);
     const centre = centres.items.find((c) => c.id === values.centre_id);
+
     return {
       ...values,
+      scheduled_at: values.scheduled_at
+        ? new Date(values.scheduled_at).toISOString()
+        : values.scheduled_at,
       player_name: player?.full_name || "",
       centre_name: centre?.name || player?.centre_name || "",
       status: values.status || "scheduled",
@@ -139,15 +143,20 @@ export default function Assessments() {
       ? Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) /
         10
       : undefined;
-    await api.patch(`/assessments/${scoring.id}`, fromUiRecord({
-      status: values.status,
-      criteria_scores: criteria,
-      overall_rating: overall,
-      feedback: values.feedback || "",
-      improvement_targets: values.improvement_targets ? values.improvement_targets.split("\n").filter(Boolean) : [],
-      completed_at:
-        values.status === "completed" ? new Date().toISOString() : undefined,
-    }));
+    await api.patch(
+      `/assessments/${scoring.id}`,
+      fromUiRecord({
+        status: values.status,
+        criteria_scores: criteria,
+        overall_rating: overall,
+        feedback: values.feedback || "",
+        improvement_targets: values.improvement_targets
+          ? values.improvement_targets.split("\n").filter(Boolean)
+          : [],
+        completed_at:
+          values.status === "completed" ? new Date().toISOString() : undefined,
+      }),
+    );
     toast({ title: "Assessment saved" });
   };
 

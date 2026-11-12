@@ -80,7 +80,8 @@ export default function Registrations() {
         </div>
       ),
     },
-    { key: 'centre_name', header: 'Centre', render: (row) => row.centre_name || '—' },
+    { key: 'centre_name', header: 'Centre', render: (row) => row.centre_name || row.centre_name_snapshot || '—' },
+    { key: 'programme_name', header: 'Programme', render: (row) => row.programme_name || row.programme_title_snapshot || '—' },
     {
       key: 'pathway',
       header: 'Pathway',
@@ -120,7 +121,7 @@ export default function Registrations() {
     <ResourcePage
       moduleKey="registrations"
       title="Registrations"
-      description="Review submitted registrations, verify documents and schedule assessments. Approving a registration provisions the player record."
+      description="Review submitted registrations, verify documents and schedule assessments. A pending player record is created at submission and activated on approval."
       entityLabel="registration"
       entity="Registration"
       fields={fields}

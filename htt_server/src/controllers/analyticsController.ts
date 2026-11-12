@@ -18,7 +18,7 @@ export const dashboardSummary: RequestHandler = asyncHandler(async (req, res) =>
     models.Enquiry.count({ where: { status: { [Op.in]: ["new", "contacted", "in_progress"] } } }),
     models.FollowUpTask.count({ where: { status: { [Op.in]: ["open", "in_progress"] }, dueDate: { [Op.lt]: today } } }),
     models.Registration.findAll({ limit: 200, order: [["createdAt", "DESC"]], attributes: ["id", "reference", "status", "createdAt"] }),
-    models.Player.findAll({ where: { archived: false }, attributes: ["id", "centreId"], include: [{ model: models.Centre, as: "centre", attributes: ["name"] }] }),
+    models.Player.findAll({ where: { archived: false, registrationStatus: "registered" }, attributes: ["id", "centreId"], include: [{ model: models.Centre, as: "centre", attributes: ["name"] }] }),
     models.ScholarshipApplication.findAll({ attributes: ["status", [fn("COUNT", col("id")), "count"]], group: ["status"], raw: true }) as any,
     models.Assessment.findAll({ where: { status: "scheduled", scheduledAt: { [Op.gte]: now } }, limit: 4, order: [["scheduledAt", "ASC"]], include: [{ model: models.Player.scope("withPersonalData"), as: "player", attributes: ["fullName"] }, { model: models.Centre, as: "centre", attributes: ["name"] }] }),
     models.FollowUpTask.findAll({ where: { status: { [Op.in]: ["open", "in_progress"] } }, limit: 4, order: [["dueDate", "ASC"]] }),
@@ -54,13 +54,13 @@ export const dashboardSummary: RequestHandler = asyncHandler(async (req, res) =>
 
 export const academyReport: RequestHandler = asyncHandler(async (_req, res) => {
   const [playersByCentre, registrationsByStatus, players, registrations, centres, completedAssessments, noCentre, pendingRegistrations, pendingCentres, pendingDocs] = await Promise.all([
-    models.Player.findAll({ where: { archived: false }, attributes: ["centreId", [fn("COUNT", col("Player.id")), "count"]], include: [{ model: models.Centre, as: "centre", attributes: ["name"] }], group: ["centreId", "centre.id", "centre.name"] }),
+    models.Player.findAll({ where: { archived: false, registrationStatus: "registered" }, attributes: ["centreId", [fn("COUNT", col("Player.id")), "count"]], include: [{ model: models.Centre, as: "centre", attributes: ["name"] }], group: ["centreId", "centre.id", "centre.name"] }),
     models.Registration.findAll({ attributes: ["status", [fn("COUNT", col("id")), "count"]], group: ["status"], raw: true }),
-    models.Player.count({ where: { archived: false } }),
+    models.Player.count({ where: { archived: false, registrationStatus: "registered" } }),
     models.Registration.count(),
     models.Centre.count(),
     models.Assessment.count({ where: { status: "completed" } }),
-    models.Player.count({ where: { archived: false, centreId: null } }),
+    models.Player.count({ where: { archived: false, registrationStatus: "registered", centreId: null } }),
     models.Registration.count({ where: { status: { [Op.in]: ["submitted", "under_review"] } } }),
     models.Centre.count({ where: { status: "pending_verification" } }),
     models.RegistrationDocument.count({ where: { status: "pending" } }),

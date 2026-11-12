@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Op, type Transaction } from "sequelize";
+import { Op, col, fn, where, type Transaction } from "sequelize";
 import { AppError } from "../errors/AppError.js";
 import { models, sequelize } from "../models/index.js";
 import { writeAudit } from "./auditService.js";
@@ -23,6 +23,7 @@ const restrictedCreateFields = ["school", "developmentNotes", "matchNotes"];
 const playerFields = [
   "id",
   "playerCode",
+  "officialPlayerId",
   "fullName",
   "dateOfBirth",
   "ageGroup",
@@ -118,6 +119,7 @@ const serialise = (player: any, includePersonal: boolean) => {
   const result: any = {
     id: player.id,
     playerCode: player.playerCode,
+    officialPlayerId: player.officialPlayerId,
     ageGroup: player.ageGroup,
     centreId: player.centreId,
     programmeId: player.programmeId,
@@ -180,9 +182,10 @@ export const listPlayers = async (
     where[Op.or] = options.includePersonal
       ? [
           { playerCode: { [Op.iLike]: search } },
+          { officialPlayerId: { [Op.iLike]: search } },
           { fullName: { [Op.iLike]: search } },
         ]
-      : [{ playerCode: { [Op.iLike]: search } }];
+      : [{ playerCode: { [Op.iLike]: search } }, { officialPlayerId: { [Op.iLike]: search } }];
   }
   const attributes = options.includePersonal
     ? playerFields
@@ -293,7 +296,28 @@ export const createPlayer = async (
     );
   checkDate(input.dateOfBirth);
   const ageGroup = input.ageGroup ?? ageGroupFor(ageOnDate(input.dateOfBirth));
+  // Direct staff entry is an existing workflow; its audit record explicitly
+  // distinguishes it from a payment-confirmed registration approval.
   const player = await sequelize.transaction(async (transaction) => {
+    const name = input.fullName.trim();
+    const dateOfBirth = input.dateOfBirth;
+    await sequelize.query("SELECT pg_advisory_xact_lock(hashtext(:dedupeKey))", {
+      replacements: { dedupeKey: `${name.toLowerCase()}:${dateOfBirth}` },
+      transaction,
+    });
+    const duplicate = await models.Player.unscoped().findOne({
+      where: {
+        [Op.and]: [
+          where(fn("lower", fn("btrim", col("full_name"))), name.toLowerCase()),
+          { dateOfBirth },
+        ],
+      },
+      attributes: ["id"],
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    if (duplicate)
+      throw new AppError(409, "POSSIBLE_DUPLICATE_PLAYER", "A player with the same name and date of birth already exists. Link the player through registration approval instead.");
     await ensureRelationships(input, transaction);
     const created = (await models.Player.unscoped().create(
       {
@@ -317,11 +341,12 @@ export const createPlayer = async (
     )) as any;
     await writeAudit({
       actorId,
-      action: "player.created",
+      action: "player.manually_created",
       entityName: "Player",
       recordId: created.id,
       transaction,
       ipAddress: ip,
+      details: `source:staff_manual;registrationStatus:${created.registrationStatus};registrationId:none;paymentVerification:not_performed`,
     });
     return created;
   });
@@ -355,6 +380,11 @@ export const updatePlayer = async (
     })) as any;
     if (!player) throw new AppError(404, "NOT_FOUND", "Player not found.");
     const nextDob = input.dateOfBirth ?? player.dateOfBirth;
+    if (input.registrationStatus === "registered" && player.registrationId) {
+      const registration = await models.Registration.findByPk(player.registrationId, { transaction }) as any;
+      if (registration && registration.status !== "approved")
+        throw new AppError(409, "REGISTRATION_APPROVAL_REQUIRED", "A registration-linked player cannot be activated outside registration approval.");
+    }
     await ensureRelationships(
       {
         centreId: input.centreId ?? player.centreId,
@@ -396,6 +426,32 @@ export const updatePlayerStatus = async (
       lock: transaction.LOCK.UPDATE,
     })) as any;
     if (!player) throw new AppError(404, "NOT_FOUND", "Player not found.");
+    const target = input.registrationStatus;
+    const linkedRegistration = player.registrationId
+      ? await models.Registration.findByPk(player.registrationId, { transaction, lock: transaction.LOCK.UPDATE }) as any
+      : null;
+    if (player.registrationId && !linkedRegistration)
+      throw new AppError(409, "LINKED_REGISTRATION_MISSING", "The player is linked to a registration that could not be found.");
+    if (player.registrationId) {
+      const allowed = linkedRegistration.status === "approved"
+        ? target === "registered" || target === "archived"
+        : linkedRegistration.status === "rejected" && target === "archived";
+      if (!allowed)
+        throw new AppError(409, "INVALID_PLAYER_STATUS_TRANSITION", "Registration-linked player status must follow its registration approval or rejection workflow.");
+    } else {
+      const transitions: Record<string, string[]> = {
+        prospective: ["waitlisted", "archived", "rejected"],
+        waitlisted: ["prospective", "archived", "rejected"],
+        registered: ["archived"],
+        archived: ["prospective"],
+        rejected: ["archived"],
+        pending: [],
+      };
+      if (target === "registered")
+        throw new AppError(409, "REGISTRATION_APPROVAL_REQUIRED", "A player can only become registered through approval of a payment-confirmed registration.");
+      if (!transitions[player.registrationStatus]?.includes(target))
+        throw new AppError(409, "INVALID_PLAYER_STATUS_TRANSITION", `Player cannot transition from ${player.registrationStatus} to ${target}.`);
+    }
     await player.update(
       {
         registrationStatus: input.registrationStatus,
@@ -413,6 +469,7 @@ export const updatePlayerStatus = async (
       recordId: id,
       transaction,
       ipAddress: ip,
+      details: `${player.registrationStatus}->${target}`,
     });
   });
   return { id, registrationStatus: input.registrationStatus, archived };

@@ -1,5 +1,6 @@
 import React from "react";
 
+/** @param {{icon: import("lucide-react").LucideIcon, title: React.ReactNode, subtitle?: React.ReactNode, footer?: React.ReactNode, children?: React.ReactNode}} props */
 export default function AuthLayout({
   icon: Icon,
   title,

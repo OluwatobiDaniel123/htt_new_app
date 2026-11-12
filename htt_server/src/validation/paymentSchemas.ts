@@ -17,7 +17,7 @@ export const manualPaymentBody = z.object({
 export const paymentListQuery = z.object({
   page: z.coerce.number().int().positive().default(1), limit: z.coerce.number().int().min(1).max(100).default(25),
   playerId: uuid.optional(), registrationId: uuid.optional(), programmeId: uuid.optional(), centreId: uuid.optional(),
-  method: z.enum(['paystack','bank_transfer','cash','pos','waiver']).optional(), status: z.enum(['pending','successful','failed','cancelled','refunded','partially_refunded']).optional(), from: dateOnly.optional(), to: dateOnly.optional(),
+  method: z.enum(['paystack','bank_transfer','cash','pos','waiver']).optional(), status: z.enum(['pending','successful','failed','cancelled','expired','refunded','partially_refunded']).optional(), from: dateOnly.optional(), to: dateOnly.optional(),
 }).strict().refine((q) => !q.from || !q.to || q.from <= q.to, 'from must be on or before to.');
 export const refundBody = z.object({ amount: money, reason: z.string().min(3).max(1000) }).strict();
 export const financeSummaryQuery = z.object({ from: dateOnly.optional(), to: dateOnly.optional(), programmeId: uuid.optional(), centreId: uuid.optional() }).strict().refine((q) => !q.from || !q.to || q.from <= q.to, 'from must be on or before to.');

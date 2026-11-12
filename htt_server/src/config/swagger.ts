@@ -1395,6 +1395,55 @@ for (const [path, permission] of adminResources) {
 }
 
 Object.assign(mutableSwaggerSpec.paths, {
+  "/public/intake": {
+    post: {
+      tags: ["Public intake"],
+      summary: "Submit a public multipart registration",
+      requestBody: {
+        required: true,
+        content: {
+          "multipart/form-data": {
+            schema: {
+              type: "object",
+              required: ["registration", "file"],
+              properties: {
+                registration: { type: "string", description: "JSON string with the exact website registration payload" },
+                file: { type: "string", format: "binary", description: "Required JPEG, PNG or WebP profile picture, up to 5 MB" },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "201": { description: "Registration, pending player and payment initialization result" },
+        "400": { description: "Invalid payload or image" },
+        "413": { description: "Image or request exceeds the size limit" },
+        "503": { description: "Private image storage unavailable" },
+      },
+    },
+  },
+  "/public/payments/{reference}": {
+    get: {
+      tags: ["Public intake"],
+      summary: "Retrieve an existing public registration payment summary",
+      parameters: [{ in: "path", name: "reference", required: true, schema: { type: "string", minLength: 20, maxLength: 160 } }],
+      responses: {
+        "200": { description: "Minimal registration and payment summary, including any stored pending checkout URL" },
+        "400": { description: "Invalid payment reference" },
+        "404": { description: "Public registration payment not found" },
+      },
+    },
+  },
+  "/registrations/{id}/profile-image": {
+    get: {
+      tags: ["Registrations"],
+      summary: "View a private registration profile image",
+      security: [{ cookieAuth: [] }],
+      parameters: [{ in: "path", name: "id", required: true, schema: { type: "string", format: "uuid" } }],
+      "x-required-permission": "registrations.read and players.read_sensitive",
+      responses: { "302": { description: "Redirect to a signed authenticated Cloudinary URL" }, "403": { description: "Insufficient permission" } },
+    },
+  },
   "/registrations/balances": { get: { tags: ["Finance"], summary: "List paginated registration balances", security: [{ cookieAuth: [] }], "x-required-permission": "registrations.read and payments.read", parameters: [{ in: "query", name: "page", schema: { type: "integer", minimum: 1 } }, { in: "query", name: "limit", schema: { type: "integer", minimum: 1, maximum: 100 } }], responses: { "200": { description: "Registration balances with payment totals" }, "401": { description: "Unauthenticated" }, "403": { description: "Insufficient permission" } } } },
   "/dashboard/summary": { get: { tags: ["Analytics"], summary: "Read permission-filtered dashboard metrics and recent activity", security: [{ cookieAuth: [] }], "x-required-permission": "dashboard", responses: { "200": { description: "Dashboard metrics, operational queues, and activity" }, "401": { description: "Unauthenticated" }, "403": { description: "Insufficient permission" } } } },
   "/reports/academy": { get: { tags: ["Analytics"], summary: "Read academy operational report", security: [{ cookieAuth: [] }], "x-required-permission": "reports", responses: { "200": { description: "Academy counts and registration checks" }, "401": { description: "Unauthenticated" }, "403": { description: "Insufficient permission" } } } },
@@ -1463,7 +1512,7 @@ Object.assign(swaggerDocument.paths, {
     post: {
       tags: ["Payments"],
       summary: "Verify Paystack reference server side",
-      security: [{ cookieAuth: [] }],
+      security: [],
       parameters: [
         {
           in: "path",
@@ -1472,7 +1521,6 @@ Object.assign(swaggerDocument.paths, {
           schema: { type: "string" },
         },
       ],
-      "x-required-permission": "payments.verify",
       responses: { "200": { description: "Verified transaction state" } },
     },
   },
@@ -1683,8 +1731,6 @@ Object.assign(swaggerDocument.components.schemas, {
 
 for (const path of Object.keys(swaggerDocument.paths)) {
   if (
-    path === "/payments" ||
-    path.startsWith("/payments/") ||
     path === "/registrations/balances" ||
     path === "/registrations/{id}/balance"
   ) {

@@ -33,7 +33,7 @@ export const verify: RequestHandler = asyncHandler(async (req, res) =>
     success: true,
     data: await service.verifyPayment(
       req.params.reference as string,
-      actor(req),
+      req.auth?.staffId,
       req.ip,
     ),
   }),
@@ -101,6 +101,7 @@ export const webhook: RequestHandler = asyncHandler(async (req, res) => {
     !service.verifyWebhookSignature(
       req.rawBody,
       req.header("x-paystack-signature"),
+      req.header("paystack-signature"),
     )
   )
     throw new AppError(

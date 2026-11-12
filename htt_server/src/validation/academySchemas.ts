@@ -30,7 +30,7 @@ export const playerListQuery = z
     search: z.string().max(100).optional(),
     archived: z.enum(["true", "false"]).optional(),
     registrationStatus: z
-      .enum(["prospective", "registered", "waitlisted", "archived"])
+      .enum(["pending", "prospective", "registered", "waitlisted", "archived", "rejected"])
       .optional(),
     scholarshipStatus: z
       .enum(["none", "applicant", "active", "declined"])
@@ -68,10 +68,12 @@ export const playerPatch = playerBody.partial().strict();
 export const playerStatusBody = z
   .object({
     registrationStatus: z.enum([
+      "pending",
       "prospective",
       "registered",
       "waitlisted",
       "archived",
+      "rejected",
     ]),
     archivedReason: z.string().max(1000).optional(),
   })

@@ -1,6 +1,7 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 
+/** @param {{title: React.ReactNode, description?: React.ReactNode, actions?: React.ReactNode, children?: React.ReactNode, className?: string, height?: string}} props */
 export default function ChartPanel({ title, description, actions, children, className, height = 'h-[230px]' }) {
   return (
     <section className={cn('htt-surface overflow-hidden', className)}>

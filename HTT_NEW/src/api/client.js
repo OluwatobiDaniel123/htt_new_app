@@ -1,27 +1,27 @@
-// const frontendEnv =
-//   /** @type {{ env?: { VITE_API_BASE_URL?: string; DEV?: boolean } }} */ (
-//     import.meta
-//   );
-// const defaultApiUrl = frontendEnv.env?.DEV
-//   ? "/api/v1"
-//   : typeof window === "undefined"
-//     ? "/api/v1"
-//     : `${window.location.origin}/api/v1`;
-// const API_BASE_URL = (
-//   frontendEnv.env?.VITE_API_BASE_URL || defaultApiUrl
-// ).replace(/\/$/, "");
 const frontendEnv =
   /** @type {{ env?: { VITE_API_BASE_URL?: string; DEV?: boolean } }} */ (
     import.meta
   );
-
 const defaultApiUrl = frontendEnv.env?.DEV
   ? "/api/v1"
-  : "https://htt-new-app.onrender.com/api/v1";
-
+  : typeof window === "undefined"
+    ? "/api/v1"
+    : `${window.location.origin}/api/v1`;
 const API_BASE_URL = (
   frontendEnv.env?.VITE_API_BASE_URL || defaultApiUrl
-).replace(/\/+$/, "");
+).replace(/\/$/, "");
+// const frontendEnv =
+//   /** @type {{ env?: { VITE_API_BASE_URL?: string; DEV?: boolean } }} */ (
+//     import.meta
+//   );
+
+// const defaultApiUrl = frontendEnv.env?.DEV
+//   ? "/api/v1"
+//   : "https://htt-new-app.onrender.com/api/v1";
+
+// const API_BASE_URL = (
+//   frontendEnv.env?.VITE_API_BASE_URL || defaultApiUrl
+// ).replace(/\/+$/, "");
 
 export class ApiError extends Error {
   constructor(status, code, message, details) {

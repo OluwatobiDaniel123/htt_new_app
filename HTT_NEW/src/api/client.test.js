@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ApiError, request } from "./client.js";
+import { ApiError, api, request } from "./client.js";
+import { getResource } from "./resources.js";
 
 test("API requests include cookies and unwrap the success envelope", async (context) => {
   let captured;
@@ -84,4 +85,43 @@ test("expired access sessions refresh once and retry with the new HttpOnly cooki
   assert.equal(calls.length, 3);
   assert.ok(calls.every((call) => call.credentials === "include"));
   assert.match(calls[1].url, /\/auth\/refresh$/);
+});
+
+test("registration detail keeps the registration record instead of unwrapping its associated player", async (context) => {
+  const registrationId = "9cc553cc-6f88-439b-8e6d-7c397f450856";
+  const response = {
+    id: registrationId,
+    reference: "HTT-REG-MW9E0WK3-4121C3",
+    status: "submitted",
+    paymentStatus: "unpaid",
+    amountDue: "40000.00",
+    amountDueCurrency: "NGN",
+    childName: "Oyelere Idowu",
+    guardianName: "Hylarious Oyelere Idowu",
+    centre: { id: "centre-id", name: "Agege Lagos Training Centre" },
+    programme: { id: "programme-id", name: "Developing Player" },
+    player: { id: "player-id", fullName: "Oyelere Idowu", registrationStatus: "pending" },
+    emergencyContact: { id: "emergency-id", fullName: "Emergency Contact", phone: "+2348000000000" },
+    paymentRecords: [{ id: "payment-id", amount: "40000.00", currency: "NGN", status: "pending" }],
+    documents: [{ id: "document-id", mediaAssetId: "asset-id", name: "Player profile picture", status: "pending" }],
+  };
+  let requestedPath;
+  context.mock.method(api, "get", async (path) => {
+    requestedPath = path;
+    return response;
+  });
+
+  const record = await getResource("Registration", registrationId);
+
+  assert.equal(requestedPath, `/registrations/${registrationId}`);
+  assert.equal(record.id, registrationId);
+  assert.equal(record.child_name, "Oyelere Idowu");
+  assert.equal(record.guardian_name, "Hylarious Oyelere Idowu");
+  assert.equal(record.centre_name, "Agege Lagos Training Centre");
+  assert.equal(record.programme_name, "Developing Player");
+  assert.equal(record.player.full_name, "Oyelere Idowu");
+  assert.equal(record.emergency_contact.full_name, "Emergency Contact");
+  assert.equal(record.payment_records[0].status, "pending");
+  assert.equal(record.payment_records[0].amount, "40000.00");
+  assert.equal(record.documents[0].media_asset_id, "asset-id");
 });

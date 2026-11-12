@@ -45,30 +45,64 @@ const DECISION_OPTIONS = [
   { status: "rejected", label: "Reject", tone: "red", destructive: true },
 ];
 
+const frontendEnv =
+  /** @type {{env?: {VITE_API_BASE_URL?: string}}} */ (import.meta);
+const API_BASE_URL =
+  frontendEnv.env?.VITE_API_BASE_URL || `${window.location.origin}/api/v1`;
+
 export default function RegistrationDetail() {
   const { id } = useParams();
   const { can } = useAppConfig();
   const { toast } = useToast();
   const [record, setRecord] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [profileImageUrl, setProfileImageUrl] = useState("");
+  const [profileImageLoading, setProfileImageLoading] = useState(false);
+  const [loadError, setLoadError] = useState(null);
   const [notes, setNotes] = useState("");
   const [savingNotes, setSavingNotes] = useState(false);
   const [decision, setDecision] = useState(null);
   const [decisionNote, setDecisionNote] = useState("");
   const [approveOpen, setApproveOpen] = useState(false);
   const [duplicateCandidates, setDuplicateCandidates] = useState([]);
-  const [existingPlayerId, setExistingPlayerId] = useState('');
+  const [existingPlayerId, setExistingPlayerId] = useState("");
   const [confirmNewPlayer, setConfirmNewPlayer] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const load = async () => {
+    setLoading(true);
+    setLoadError(null);
     try {
-      const res = await getResource('Registration', id);
-      const recordData = res;
-      setRecord(recordData);
-      setNotes(recordData.internal_notes || "");
-    } catch {
+      const res = await getResource("Registration", id);
+      if (!res?.id)
+        throw new Error("The registration response did not contain a record.");
+
+      setRecord(res);
+      setNotes(res.internal_notes || "");
+
+      setProfileImageUrl("");
+
+      if (res.profile_image_asset_id) {
+        setProfileImageLoading(true);
+
+        try {
+          const imageResponse = await api.get(
+            `/registrations/${res.id}/profile-image`,
+          );
+
+          setProfileImageUrl(imageResponse?.url || "");
+        } catch (error) {
+          console.error("Unable to load registration profile image:", error);
+        } finally {
+          setProfileImageLoading(false);
+        }
+      }
+    } catch (error) {
       setRecord(null);
+      setLoadError(
+        error?.message ||
+          "An unexpected error occurred while loading this registration.",
+      );
     } finally {
       setLoading(false);
     }
@@ -85,28 +119,47 @@ export default function RegistrationDetail() {
       </div>
     );
   }
+
   if (!can("registrations")) return <AccessDenied moduleName="registrations" />;
+
   if (!record) {
     return (
       <div className="py-20 text-center">
-        <p className="text-[14px] font-medium">Registration not found</p>
-        <p className="mt-1 text-[12.5px] text-muted-foreground">
-          It may have been deleted or you may not have access.
+        <p className="text-[14px] font-medium">
+          {loadError === "Registration not found."
+            ? "Registration not found"
+            : "Unable to load registration"}
         </p>
-        <Button asChild variant="outline" size="sm" className="mt-4">
-          <Link to="/registrations">Back to registrations</Link>
-        </Button>
+        <p className="mt-1 text-[12.5px] text-muted-foreground">
+          {loadError ||
+            "The registration may have been deleted or you may not have access."}
+        </p>
+        <div className="mt-4 flex justify-center gap-2">
+          <Button variant="outline" size="sm" onClick={load}>
+            Try again
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link to="/registrations">Back to registrations</Link>
+          </Button>
+        </div>
       </div>
     );
   }
 
   const manage = can("registrations", "full");
   const linked = !!record.linked_player_id;
+  const approved = record.status === "approved";
 
   const applyStatus = async (status, note) => {
-    const actions = { under_review: 'start-review', assessment_required: 'require-assessment', information_required: 'request-changes', rejected: 'reject' };
+    const actions = {
+      under_review: "start-review",
+      assessment_required: "require-assessment",
+      information_required: "request-changes",
+      rejected: "reject",
+    };
     const action = actions[status];
-    if (!action) throw new Error('This registration status is not supported by the API.');
+    if (!action)
+      throw new Error("This registration status is not supported by the API.");
     await api.post(`/registrations/${record.id}/${action}`, { note });
     await load();
     toast({ title: `Registration marked ${labelize(status).toLowerCase()}` });
@@ -115,28 +168,50 @@ export default function RegistrationDetail() {
   const handleApprove = async () => {
     setBusy(true);
     try {
-      if (duplicateCandidates.length && !existingPlayerId && !confirmNewPlayer) {
-        throw new Error('Select a matching player or explicitly confirm creating a new player.');
+      if (
+        duplicateCandidates.length &&
+        !existingPlayerId &&
+        !confirmNewPlayer
+      ) {
+        throw new Error(
+          "Select a matching player or explicitly confirm creating a new player.",
+        );
       }
       const approval = {
         note: decisionNote,
-        ...(existingPlayerId ? { existingPlayerId } : confirmNewPlayer ? { confirmNewPlayer: true } : {}),
+        ...(existingPlayerId
+          ? { existingPlayerId }
+          : confirmNewPlayer
+            ? { confirmNewPlayer: true }
+            : {}),
       };
-      const result = await api.post(`/registrations/${record.id}/approve`, approval);
-      toast({ title: result.created ? 'Player record created' : 'Existing player linked', description: result.playerId ? `Player ${result.playerId}` : undefined });
+      const result = await api.post(
+        `/registrations/${record.id}/approve`,
+        approval,
+      );
+      toast({
+        title: "Registration approved",
+        description:
+          result.officialPlayerId ||
+          (result.playerId ? `Player ${result.playerId}` : undefined),
+      });
       setApproveOpen(false);
-      setDecisionNote('');
+      setDecisionNote("");
       setDuplicateCandidates([]);
-      setExistingPlayerId('');
+      setExistingPlayerId("");
       setConfirmNewPlayer(false);
       await load();
     } catch (error) {
-      if (error.code === 'POSSIBLE_DUPLICATE_PLAYER') {
+      if (error.code === "POSSIBLE_DUPLICATE_PLAYER") {
         setDuplicateCandidates(error.details?.candidates || []);
-        throw new Error('A possible matching player exists. Review the options below before continuing.');
+        throw new Error(
+          "A possible matching player exists. Review the options below before continuing.",
+        );
       }
       throw error;
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleDecision = async () => {
@@ -145,17 +220,21 @@ export default function RegistrationDetail() {
     try {
       await applyStatus(decision.status, decisionNote);
       setDecision(null);
-      setDecisionNote('');
-    } finally { setBusy(false); }
+      setDecisionNote("");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const saveNotes = async () => {
     setSavingNotes(true);
     try {
       await api.patch(`/registrations/${record.id}`, { internalNotes: notes });
-      toast({ title: 'Internal notes saved' });
+      toast({ title: "Internal notes saved" });
       await load();
-    } finally { setSavingNotes(false); }
+    } finally {
+      setSavingNotes(false);
+    }
   };
 
   const setDocumentStatus = async (index, status) => {
@@ -185,32 +264,63 @@ export default function RegistrationDetail() {
         }`}
         actions={
           manage ? (
-            <>
-              {DECISION_OPTIONS.map((opt) => (
+            <div className="flex flex-row p-4 items-center">
+              <div className="p-4">
+                {profileImageLoading ? (
+                  <p className="text-[12.5px] text-muted-foreground">
+                    Loading profile picture...
+                  </p>
+                ) : profileImageUrl ? (
+                  <img
+                    src={profileImageUrl}
+                    alt={`${record.child_name} profile`}
+                    className="max-h-[100px] rounded-lg object-contain"
+                  />
+                ) : (
+                  <p className="text-[12.5px] text-muted-foreground">
+                    No profile picture available.
+                  </p>
+                )}
+              </div>
+
+              <div>
+                {DECISION_OPTIONS.map((opt) => (
+                  <Button
+                    key={opt.status}
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-[12px]"
+                    disabled={busy || record.status === opt.status}
+                    onClick={() => {
+                      setDecision(opt);
+                      setDecisionNote("");
+                    }}
+                  >
+                    {opt.label}
+                  </Button>
+                ))}
                 <Button
-                  key={opt.status}
                   size="sm"
-                  variant="outline"
-                  className="h-8 text-[12px]"
-                  disabled={busy || record.status === opt.status}
+                  className="h-8 gap-1.5 bg-[#0E7A4F] text-[12px] hover:bg-[#0b6a44]"
+                  disabled={
+                    busy || approved || record.payment_status !== "paid"
+                  }
                   onClick={() => {
-                    setDecision(opt);
-                    setDecisionNote("");
+                    setDuplicateCandidates([]);
+                    setExistingPlayerId("");
+                    setConfirmNewPlayer(false);
+                    setApproveOpen(true);
                   }}
                 >
-                  {opt.label}
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  {approved
+                    ? "Approved"
+                    : record.payment_status !== "paid"
+                      ? "Payment required"
+                      : "Approve registration"}
                 </Button>
-              ))}
-              <Button
-                size="sm"
-                className="h-8 gap-1.5 bg-[#0E7A4F] text-[12px] hover:bg-[#0b6a44]"
-                disabled={busy || linked}
-                onClick={() => { setDuplicateCandidates([]); setExistingPlayerId(''); setConfirmNewPlayer(false); setApproveOpen(true); }}
-              >
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                {linked ? "Approved" : "Approve & create player"}
-              </Button>
-            </>
+              </div>
+            </div>
           ) : (
             <StatusBadge value={record.status} map={REG_STATUS} />
           )
@@ -222,20 +332,55 @@ export default function RegistrationDetail() {
           <SectionCard title="Application details">
             <DetailGrid>
               <DetailField label="Child" value={record.child_name} />
+              <DetailField label="Gender" value={record.child_gender} />
               <DetailField
                 label="Date of birth"
                 value={formatDate(record.child_date_of_birth)}
+              />
+              <DetailField label="School" value={record.child_school} />
+              <DetailField label="Class" value={record.child_class_name} />
+              <DetailField
+                label="Position"
+                value={record.child_position_uuid}
               />
               <DetailField label="Age group" value={record.age_group} />
               <DetailField label="Pathway" value={labelize(record.pathway)} />
               <DetailField label="Centre" value={record.centre_name} />
               <DetailField label="Programme" value={record.programme_name} />
+              <DetailField
+                label="Submitted centre name"
+                value={record.centre_name_snapshot}
+              />
+              <DetailField
+                label="Submitted programme title"
+                value={record.programme_title_snapshot}
+              />
+              <DetailField
+                label="Submitted programme base fee"
+                value={currency(record.programme_base_fee_submitted)}
+              />
+              <DetailField
+                label="Submitted payment frequency"
+                value={record.payment_frequency}
+              />
+              <DetailField
+                label="Submitted payment fee"
+                value={currency(record.payment_fee_submitted)}
+              />
               <DetailField label="Guardian" value={record.guardian_name} />
+              <DetailField
+                label="Guardian relationship"
+                value={record.guardian_relationship}
+              />
               <DetailField
                 label="Guardian contact"
                 value={`${record.guardian_phone || "—"}${record.guardian_email ? ` · ${record.guardian_email}` : ""}`}
               />
               <DetailField label="Address" value={record.guardian_address} />
+              <DetailField
+                label="Alternative phone"
+                value={record.guardian_alternative_phone}
+              />
               <DetailField label="Source" value={labelize(record.source)} />
               <DetailField
                 label="Submitted"
@@ -248,9 +393,28 @@ export default function RegistrationDetail() {
             </DetailGrid>
           </SectionCard>
 
+          <SectionCard title="Emergency contact">
+            <DetailGrid>
+              <DetailField
+                label="Name"
+                value={
+                  record.emergency_contact?.full_name ||
+                  record.emergency_contact_name
+                }
+              />
+              <DetailField
+                label="Phone"
+                value={
+                  record.emergency_contact?.phone ||
+                  record.emergency_contact_phone
+                }
+              />
+            </DetailGrid>
+          </SectionCard>
+
           <SectionCard
             title="Documents"
-            description="Document review metadata is available. Private upload and download need a storage service, which is not configured yet."
+            description="Uploaded registration documents and their review status."
           >
             {(record.documents || []).length === 0 ? (
               <p className="py-4 text-center text-[12.5px] text-muted-foreground">
@@ -343,12 +507,37 @@ export default function RegistrationDetail() {
                 label="Amount due"
                 value={currency(record.amount_due)}
               />
+              {(record.payment_records || []).map((payment) => (
+                <div
+                  key={payment.id}
+                  className="rounded-md border border-border/60 p-2 text-[11.5px]"
+                >
+                  <div className="flex justify-between gap-2">
+                    <span>{payment.reference}</span>
+                    <StatusBadge value={payment.status} />
+                  </div>
+                  <p className="mt-1 text-muted-foreground">
+                    Requested {currency(payment.amount)} {payment.currency} ·{" "}
+                    {labelize(payment.provider_status || "unverified")}
+                  </p>
+                  {payment.verified_at ? (
+                    <p className="text-muted-foreground">
+                      Verified {currency(payment.verified_amount)}{" "}
+                      {payment.verified_currency} ·{" "}
+                      {formatDateTime(payment.verified_at)}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
               {linked ? (
                 <Link
                   to={`/players/${record.linked_player_id}`}
                   className="mt-2 inline-flex text-[12px] font-medium text-[#0E7A4F] hover:underline"
                 >
-                  View linked player record
+                  View player record
+                  {record.player?.official_player_id
+                    ? ` · ${record.player.official_player_id}`
+                    : ""}
                 </Link>
               ) : null}
             </div>
@@ -377,7 +566,6 @@ export default function RegistrationDetail() {
               ))}
             </ul>
           </SectionCard>
-
 
           <SectionCard title="Status history">
             {(record.status_history || []).length === 0 ? (
@@ -443,9 +631,9 @@ export default function RegistrationDetail() {
         description={
           <span className="block space-y-2">
             <span className="block">
-              A player record is created (or an existing one linked), guardian
-              and consent records are provisioned, and the registration is
-              marked approved.
+              The existing pending player is activated, an official player ID is
+              assigned, and the registration is marked approved. Confirmed
+              registration payment is required.
             </span>
             <Textarea
               value={decisionNote}
@@ -456,15 +644,33 @@ export default function RegistrationDetail() {
             />
             {duplicateCandidates.length ? (
               <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-[12px]">
-                <p className="font-medium">A possible existing player matched this registration.</p>
+                <p className="font-medium">
+                  A possible existing player matched this registration.
+                </p>
                 {duplicateCandidates.map((candidate) => (
                   <label key={candidate.id} className="flex items-center gap-2">
-                    <input type="radio" name="existing-player" checked={existingPlayerId === candidate.id} onChange={() => { setExistingPlayerId(candidate.id); setConfirmNewPlayer(false); }} />
-                    Link to {candidate.playerCode || candidate.id}{candidate.archived ? ' (archived)' : ''}
+                    <input
+                      type="radio"
+                      name="existing-player"
+                      checked={existingPlayerId === candidate.id}
+                      onChange={() => {
+                        setExistingPlayerId(candidate.id);
+                        setConfirmNewPlayer(false);
+                      }}
+                    />
+                    Link to {candidate.playerCode || candidate.id}
+                    {candidate.archived ? " (archived)" : ""}
                   </label>
                 ))}
                 <label className="flex items-center gap-2">
-                  <input type="checkbox" checked={confirmNewPlayer} onChange={(event) => { setConfirmNewPlayer(event.target.checked); if (event.target.checked) setExistingPlayerId(''); }} />
+                  <input
+                    type="checkbox"
+                    checked={confirmNewPlayer}
+                    onChange={(event) => {
+                      setConfirmNewPlayer(event.target.checked);
+                      if (event.target.checked) setExistingPlayerId("");
+                    }}
+                  />
                   Create a new player despite the possible match
                 </label>
               </div>
@@ -474,7 +680,6 @@ export default function RegistrationDetail() {
         confirmLabel="Approve registration"
         onConfirm={handleApprove}
       />
-
     </div>
   );
 }

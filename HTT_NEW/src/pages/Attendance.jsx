@@ -56,6 +56,7 @@ export default function Attendance() {
     () => centres.items.map((c) => ({ value: c.id, label: c.name })),
     [centres.items],
   );
+
   const programmeOptions = useMemo(
     () => programmes.items.map((p) => ({ value: p.id, label: p.name })),
     [programmes.items],

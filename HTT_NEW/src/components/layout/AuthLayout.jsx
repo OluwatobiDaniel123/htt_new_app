@@ -1,5 +1,7 @@
 import React from "react";
 
+/** @param {{icon: import("lucide-react").LucideIcon, title: React.ReactNode, subtitle?: React.ReactNode, footer?: React.ReactNode, children?: React.ReactNode}} props */
+/** @param {{icon: import("lucide-react").LucideIcon, title: React.ReactNode, subtitle?: React.ReactNode, footer?: React.ReactNode, children?: React.ReactNode}} props */
 export default function AuthLayout({ icon: Icon, title, subtitle, footer, children }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">

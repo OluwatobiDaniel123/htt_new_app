@@ -2,6 +2,7 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Plus } from 'lucide-react';
 
+/** @param {{label?: string, onClick: () => void, disabled?: boolean, title?: string}} props */
 export function AddButton({ label = 'New record', onClick, disabled, title }) {
   return (
     <Button
@@ -17,6 +18,7 @@ export function AddButton({ label = 'New record', onClick, disabled, title }) {
   );
 }
 
+/** @param {{value?: string, onChange: (value: string) => void, options: Array<{value: string, label: string}>, placeholder: string, className?: string}} props */
 export function FilterSelect({ value, onChange, options, placeholder, className = 'w-[170px]' }) {
   return (
     <select
@@ -34,6 +36,7 @@ export function FilterSelect({ value, onChange, options, placeholder, className 
   );
 }
 
+/** @param {{shown: number, total: number | null, hasMore: boolean, onLoadMore: () => void, noun?: string}} props */
 export function TableFooter({ shown, total, hasMore, onLoadMore, noun = 'records' }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-muted-foreground">

@@ -2,6 +2,7 @@ import React from 'react';
 import { labelize, STATUS_TONES } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 
+/** @param {{value: string | number | null | undefined, map?: Record<string, {label?: string, tone?: string}>, tone?: string, className?: string, dot?: boolean}} props */
 export default function StatusBadge({ value, map, tone, className, dot = true }) {
   if (value === null || value === undefined || value === '') {
     return <span className="text-xs text-muted-foreground/70">—</span>;

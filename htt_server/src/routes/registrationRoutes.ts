@@ -30,6 +30,13 @@ registrationRoutes.post(
   registrations.createRegistration,
 );
 registrationRoutes.get(
+  "/:id/profile-image",
+  uuidParam(),
+  requirePermission("registrations.read"),
+  requirePermission("players.read_sensitive", "full"),
+  registrations.getRegistrationProfileImage,
+);
+registrationRoutes.get(
   "/:id",
   uuidParam(),
   requirePermission("registrations.read"),

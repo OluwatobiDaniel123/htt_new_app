@@ -2,6 +2,7 @@ import React from 'react';
 import { Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 
+/** @param {{value: string, onChange: (value: string) => void, placeholder?: string, className?: string}} props */
 export function SearchInput({ value, onChange, placeholder = 'Search…', className = '' }) {
   return (
     <div className={`relative ${className}`}>
@@ -16,6 +17,7 @@ export function SearchInput({ value, onChange, placeholder = 'Search…', classN
   );
 }
 
+/** @param {{children?: React.ReactNode, right?: React.ReactNode}} props */
 export default function ListToolbar({ children, right }) {
   return (
     <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">

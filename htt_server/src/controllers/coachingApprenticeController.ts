@@ -9,7 +9,7 @@ import {
 
 export const apply: RequestHandler = asyncHandler(async (req, res) => {
   const application = await submitCoachingApprenticeApplication(
-    req.validatedBody,
+    req.validatedBody as Parameters<typeof submitCoachingApprenticeApplication>[0],
     req.ip,
     req.get("user-agent"),
   );
@@ -31,7 +31,7 @@ export const get: RequestHandler = asyncHandler(async (req, res) => {
 export const updateStatus: RequestHandler = asyncHandler(async (req, res) => {
   const application = await updateCoachingApprenticeApplicationStatus(
     req.params.id as string,
-    req.validatedBody.status,
+    (req.validatedBody as { status: string }).status,
     req.auth!.staffId,
     req.ip,
     req.get("user-agent"),

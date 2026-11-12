@@ -5,7 +5,7 @@ const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default("development"),
-  PORT: z.coerce.number().int().min(1).max(65535).default(4000),
+  PORT: z.coerce.number().int().min(1).max(65535).default(8000),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
@@ -37,6 +37,10 @@ const envSchema = z.object({
     )
     .pipe(z.array(z.string().url()))
     .transform((origins) => origins.map((origin) => new URL(origin).origin)),
+  PAYSTACK_CALLBACK_URL: z
+    .string()
+    .url()
+    .default("http://localhost:5173/payment/callback"),
   DATABASE_URL: z.string().optional().default(""),
   PGHOST: z.string().default("localhost"),
   PGPORT: z.coerce.number().int().min(1).max(65535).default(5432),
@@ -88,6 +92,7 @@ const envSchema = z.object({
   RESEND_API_KEY: z.string().optional().default(""),
   RESEND_FROM_EMAIL: z.string().optional().default(""),
   PAYSTACK_SECRET_KEY: z.string().optional().default(""),
+  // Optional while legacy x-paystack-signature remains enabled on existing accounts.
   PAYSTACK_WEBHOOK_SECRET: z.string().optional().default(""),
   PAYSTACK_API_BASE_URL: z.string().url().default("https://api.paystack.co"),
   PAYSTACK_TIMEOUT_MS: z.coerce
@@ -134,6 +139,22 @@ if (!parsed.success) {
     .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
     .join("\n");
   throw new Error(`Invalid environment configuration:\n${errors}`);
+}
+
+const callbackHost = new URL(parsed.data.PAYSTACK_CALLBACK_URL).hostname;
+if (parsed.data.NODE_ENV !== "production") {
+  if (!["localhost", "127.0.0.1", "::1"].includes(callbackHost)) {
+    throw new Error(
+      "PAYSTACK_CALLBACK_URL must use localhost during local development and tests.",
+    );
+  }
+} else if (
+  !process.env.PAYSTACK_CALLBACK_URL ||
+  ["localhost", "127.0.0.1", "::1"].includes(callbackHost)
+) {
+  throw new Error(
+    "PAYSTACK_CALLBACK_URL must be explicitly configured for production.",
+  );
 }
 
 export const env = parsed.data;

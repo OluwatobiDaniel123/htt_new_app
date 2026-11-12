@@ -21,6 +21,9 @@ import {
 } from '@/components/ui/select';
 import { Loader2 } from 'lucide-react';
 
+/** @typedef {{name: string, label: string, type?: string, required?: boolean, options?: Array<{value: string, label: string}>, defaultValue?: unknown, placeholder?: string, help?: string, rows?: number, min?: number, max?: number, step?: number, colSpan?: number, clearable?: boolean, section?: string, disabled?: boolean}} FormField */
+
+/** @param {FormField} field */
 const emptyFor = (field) => {
   if (field.type === 'checkbox') return false;
   if (field.type === 'multiselect') return [];
@@ -28,7 +31,9 @@ const emptyFor = (field) => {
   return '';
 };
 
+/** @param {FormField[]} fields @param {Record<string, unknown> | null | undefined} initial */
 const buildInitial = (fields, initial) => {
+  /** @type {Record<string, unknown>} */
   const base = {};
   fields.forEach((f) => {
     const raw = initial?.[f.name];
@@ -49,6 +54,15 @@ const buildInitial = (fields, initial) => {
   return base;
 };
 
+/** @param {unknown} value */
+const formStringValue = (value) =>
+  typeof value === 'string' || typeof value === 'number' ? value : '';
+
+/** @param {unknown} value */
+const formStringArray = (value) =>
+  Array.isArray(value) ? value.filter((item) => typeof item === 'string') : [];
+
+/** @param {{open: boolean, onOpenChange: (open: boolean) => void, title: string, description?: string, fields?: FormField[], initial?: Record<string, unknown> | null, onSubmit: (values: Record<string, unknown>) => void | Promise<void>, submitLabel?: string, columns?: number, size?: string}} props */
 export default function FormDialog({
   open,
   onOpenChange,
@@ -61,7 +75,7 @@ export default function FormDialog({
   columns = 2,
   size = 'max-w-2xl',
 }) {
-  const [values, setValues] = useState(() => buildInitial(fields, initial));
+  const [values, setValues] = useState(/** @type {Record<string, unknown>} */ (buildInitial(fields, initial)));
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -88,6 +102,7 @@ export default function FormDialog({
       setError(`${missing.label} is required.`);
       return;
     }
+    /** @type {Record<string, unknown>} */
     const payload = {};
     fields.forEach((f) => {
       let v = values[f.name];
@@ -132,7 +147,7 @@ export default function FormDialog({
     const id = `field-${f.name}`;
     const common = {
       id,
-      value: values[f.name] ?? '',
+      value: formStringValue(values[f.name]),
       onChange: (e) => setValue(f.name, e.target.value),
       placeholder: f.placeholder || '',
       disabled: saving || !!f.disabled,
@@ -151,7 +166,7 @@ export default function FormDialog({
           <Textarea {...common} rows={f.rows || 3} className="text-[13px]" />
         ) : f.type === 'select' ? (
           <Select
-            value={values[f.name] || ''}
+            value={String(formStringValue(values[f.name]))}
             onValueChange={(v) => setValue(f.name, v)}
             disabled={saving || !!f.disabled}
           >
@@ -191,7 +206,8 @@ export default function FormDialog({
               <p className="px-1 py-1 text-[12px] text-muted-foreground">No options available</p>
             ) : (
               (f.options || []).map((opt) => {
-                const checked = (values[f.name] || []).includes(opt.value);
+                const selectedValues = formStringArray(values[f.name]);
+                const checked = selectedValues.includes(opt.value);
                 return (
                   <label
                     key={opt.value}
@@ -203,8 +219,8 @@ export default function FormDialog({
                         setValue(
                           f.name,
                           c === true
-                            ? [...(values[f.name] || []), opt.value]
-                            : (values[f.name] || []).filter((v) => v !== opt.value)
+                            ? [...selectedValues, opt.value]
+                            : selectedValues.filter((v) => v !== opt.value)
                         )
                       }
                       disabled={saving || !!f.disabled}

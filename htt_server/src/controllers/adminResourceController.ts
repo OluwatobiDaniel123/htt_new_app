@@ -66,6 +66,17 @@ const audit = (req: any, action: string, entity: string, id: string, transaction
   transaction,
 });
 
+const assertActiveAcademyPlayers = async (playerIds: string[]) => {
+  const ids = [...new Set(playerIds)];
+  if (!ids.length) return;
+  const players = await models.Player.unscoped().findAll({
+    where: { id: { [Op.in]: ids }, archived: false, registrationStatus: "registered" },
+    attributes: ["id"],
+  });
+  if (players.length !== ids.length)
+    throw new AppError(400, "INACTIVE_PLAYER", "Teams may only include active registered players.");
+};
+
 export const saveAttendanceMarks: RequestHandler = asyncHandler(async (req, res) => {
   const session = await models.AttendanceSession.findByPk(paramId(req)) as any;
   if (!session) throw new AppError(404, "NOT_FOUND", "Attendance session was not found.");
@@ -73,7 +84,7 @@ export const saveAttendanceMarks: RequestHandler = asyncHandler(async (req, res)
   const records = req.body.records as Array<{ playerId: string; status: string; notes?: string | null }>;
   await sequelize.transaction(async (transaction) => {
     const playerIds = [...new Set(records.map((row) => row.playerId))];
-    const players = await models.Player.findAll({ where: { id: { [Op.in]: playerIds }, archived: false, centreId: session.centreId }, transaction });
+    const players = await models.Player.findAll({ where: { id: { [Op.in]: playerIds }, archived: false, registrationStatus: "registered", centreId: session.centreId }, transaction });
     if (players.length !== playerIds.length) throw new AppError(400, "VALIDATION_ERROR", "Every player must be active and registered at the session centre.");
     for (const item of records) {
       const [record, created] = await models.AttendanceRecord.findOrCreate({
@@ -83,8 +94,9 @@ export const saveAttendanceMarks: RequestHandler = asyncHandler(async (req, res)
       });
       if (!created) await record.update({ status: item.status, notes: item.notes || null }, { transaction });
     }
-    const present = records.filter((item) => item.status === "present" || item.status === "late").length;
-    const absent = records.filter((item) => item.status === "absent").length;
+    const persistedRecords = await models.AttendanceRecord.findAll({ where: { sessionId: session.id }, attributes: ["status"], transaction }) as any[];
+    const present = persistedRecords.filter((item) => item.status === "present" || item.status === "late").length;
+    const absent = persistedRecords.filter((item) => item.status === "absent").length;
     await session.update({ presentCount: present, absentCount: absent, status: "completed" }, { transaction });
     await audit(req, "attendance.marked", "AttendanceSession", session.id, transaction);
   });
@@ -243,6 +255,7 @@ export const createAdminResource = (name: keyof typeof adminResourceDefinitions)
   if (name === "Story" && body.safeguardingApproved === true && req.auth?.permissions["safeguarding.manage"] !== "full") throw new AppError(403, "FORBIDDEN", "Safeguarding approval requires safeguarding manager permission.");
   const playerIds: string[] | undefined = name === "Team" && Array.isArray(body.playerIds) ? body.playerIds as string[] : undefined;
   if (name === "Team") delete body.playerIds;
+  if (name === "Team" && playerIds) await assertActiveAcademyPlayers(playerIds);
   if (name === "Fixture" && body.homeTeamId === body.awayTeamId) throw new AppError(400, "VALIDATION_ERROR", "A team cannot play itself.");
   if ("singleton" in definition && definition.singleton) {
     const existing = await modelFor(name).findOne();
@@ -261,6 +274,7 @@ export const updateAdminResource = (name: keyof typeof adminResourceDefinitions)
   await resolveStaffFields(name, body);
   const playerIds: string[] | undefined = name === "Team" && Array.isArray(body.playerIds) ? body.playerIds as string[] : undefined;
   if (name === "Team") delete body.playerIds;
+  if (name === "Team" && playerIds) await assertActiveAcademyPlayers(playerIds);
   if (name === "Fixture" && body.homeTeamId && body.awayTeamId && body.homeTeamId === body.awayTeamId) throw new AppError(400, "VALIDATION_ERROR", "A team cannot play itself.");
   if (name === "Story" && body.status === "published" && (body.involvesChildren ?? record.involvesChildren) && !(body.safeguardingApproved ?? record.safeguardingApproved)) {
     throw new AppError(409, "SAFEGUARDING_APPROVAL_REQUIRED", "Content involving children requires safeguarding approval before publication.");
@@ -283,10 +297,12 @@ export const updateAdminResource = (name: keyof typeof adminResourceDefinitions)
 });
 
 export const deleteAdminResource = (name: keyof typeof adminResourceDefinitions): RequestHandler => asyncHandler(async (req, res) => {
-  const record = await modelFor(name).findByPk(paramId(req));
-  if (!record) throw new AppError(404, "NOT_FOUND", `${name} was not found.`);
-  await record.destroy();
   const deletedId = paramId(req);
-  await audit(req, `${snake(name)}.deleted`, name, deletedId);
+  await sequelize.transaction(async (transaction) => {
+    const record = await modelFor(name).findByPk(deletedId, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!record) throw new AppError(404, "NOT_FOUND", `${name} was not found.`);
+    await record.destroy({ transaction });
+    await audit(req, `${snake(name)}.deleted`, name, deletedId, transaction);
+  });
   res.json({ success: true, data: { id: deletedId } });
 });

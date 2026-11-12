@@ -1,4 +1,4 @@
-import { api, fromUiRecord, toUiRecord } from '@/api/client';
+import { api, fromUiRecord, toUiRecord } from './client.js';
 
 const endpoints = {
   User: '/staff',
@@ -81,7 +81,7 @@ const normalizeRecord = (entity, raw) => {
   const row = toUiRecord(raw);
   row.created_date ??= row.created_at;
   if (entity === 'Player') {
-    row.player_id ??= row.player_code;
+    row.player_id ??= row.official_player_id ?? row.player_code;
     row.centre_name ??= row.centre?.name;
     row.programme_name ??= row.programme?.name;
   }
@@ -181,7 +181,13 @@ export async function listResource(entity, query = {}, options = {}) {
 
 export async function getResource(entity, id) {
   const data = await api.get(`${endpoints[entity]}/${encodeURIComponent(id)}`);
-  const record = data?.player || data?.guardian || data?.registration || data?.centre || data?.programme || data?.staff || data;
+  // Detail responses are usually the resource itself. A Registration also has
+  // an associated `player`, so blindly unwrapping that key discards the
+  // registration and leaves the detail page with only player fields.
+  const isResourceRecord = data && typeof data === 'object' && Object.hasOwn(data, 'id');
+  const record = isResourceRecord
+    ? data
+    : data?.player || data?.guardian || data?.registration || data?.centre || data?.programme || data?.staff || data;
   return normalizeRecord(entity, record);
 }
 

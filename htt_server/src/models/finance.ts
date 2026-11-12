@@ -41,6 +41,12 @@ export const defineFinanceModels = (sequelize: Sequelize) => ({
       },
       metadata: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
       providerStatus: { type: DataTypes.STRING(40), field: "provider_status" },
+      expiresAt: { type: DataTypes.DATE, field: "expires_at" },
+      verifiedAt: { type: DataTypes.DATE, field: "verified_at" },
+      verifiedAmount: { type: DataTypes.DECIMAL(12, 2), field: "verified_amount" },
+      verifiedCurrency: { type: DataTypes.STRING(3), field: "verified_currency" },
+      providerTransactionId: { type: DataTypes.STRING(120), field: "provider_transaction_id" },
+      verificationDetails: { type: DataTypes.JSONB, allowNull: false, defaultValue: {}, field: "verification_details" },
       amount: { type: DataTypes.DECIMAL(12, 2), allowNull: false },
       currency: {
         type: DataTypes.STRING(3),
@@ -140,6 +146,11 @@ export const defineFinanceModels = (sequelize: Sequelize) => ({
       type: DataTypes.STRING(160),
       unique: true,
       field: "gateway_reference",
+    },
+    providerRefundReference: {
+      type: DataTypes.STRING(160),
+      unique: true,
+      field: "provider_refund_reference",
     },
     amount: { type: DataTypes.DECIMAL(12, 2), allowNull: false },
     currency: {

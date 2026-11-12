@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Loader2 } from 'lucide-react';
 
+/** @param {{open: boolean, onOpenChange: (open: boolean) => void, title: React.ReactNode, description?: React.ReactNode, confirmLabel?: string, destructive?: boolean, onConfirm: () => void | Promise<void>}} props */
 export default function ConfirmDialog({
   open,
   onOpenChange,

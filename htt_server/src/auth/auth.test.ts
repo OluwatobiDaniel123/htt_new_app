@@ -2,10 +2,64 @@ import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import jwt from "jsonwebtoken";
 import { createHmac } from "node:crypto";
+import type { Request, Response as ExpressResponse } from "express";
+
+type RouteStackLayer = {
+  route?: {
+    path?: string;
+    methods?: Record<string, boolean>;
+    stack: Array<{ handle: unknown }>;
+  };
+};
+type RegistrationFixture = Record<string, unknown> & {
+  id: string;
+  reference: string;
+  status: string;
+  centreId?: string;
+  programmeId?: string;
+  amountDue?: number;
+  amountDueCurrency?: string;
+  consentMedical?: boolean;
+  consentData?: boolean;
+  publicPayload?: { agreeTerms?: boolean; [key: string]: unknown };
+  centreNameSnapshot?: string;
+  programmeTitleSnapshot?: string;
+  programmeBaseFeeSubmitted?: number;
+  linkedPlayerId?: string;
+  submissionFingerprint?: string;
+  update: (changes: Record<string, unknown>) => Promise<unknown>;
+};
+type PaymentFixture = Record<string, unknown> & {
+  id: string;
+  reference?: string;
+  registrationId?: string;
+  amount?: string;
+  currency?: string;
+  status: string;
+  metadata?: { checkoutUrl?: string; [key: string]: unknown };
+  verificationDetails?: { status?: string; [key: string]: unknown };
+  update?: (changes: Record<string, unknown>) => Promise<unknown>;
+  save: () => Promise<unknown>;
+};
+type PaystackInitFixture = Record<string, unknown> & {
+  amount?: string;
+  currency?: string;
+  callback_url?: string;
+  metadata?: { registration_id?: string; [key: string]: unknown };
+};
+type PlayerFixture = Record<string, unknown> & {
+  registrationStatus?: string;
+  officialPlayerId?: string | null;
+};
+const stringOption = (options: { where: Record<string, unknown> }, key: string): string => {
+  const value = options.where[key];
+  return typeof value === "string" ? value : "";
+};
 
 process.env.NODE_ENV = "test";
 process.env.LOG_LEVEL = "silent";
 process.env.FRONTEND_URL = "http://localhost:5173";
+process.env.PAYSTACK_CALLBACK_URL = "http://localhost:5173/payment/callback";
 process.env.JWT_ACCESS_SECRET =
   "test_access_secret_at_least_thirty_two_characters_long";
 process.env.JWT_REFRESH_SECRET =
@@ -15,6 +69,9 @@ process.env.PAYSTACK_SECRET_KEY =
 process.env.PAYSTACK_WEBHOOK_SECRET =
   "test_paystack_webhook_secret_for_signature_validation";
 process.env.NOTIFICATIONS_ENABLED = "false";
+process.env.CLOUDINARY_CLOUD_NAME = "htt-unit-test-cloud";
+process.env.CLOUDINARY_API_KEY = "htt-unit-test-key";
+process.env.CLOUDINARY_API_SECRET = "htt-unit-test-secret";
 
 const [
   { passwordSchema, verifyPassword },
@@ -29,18 +86,26 @@ const [
   import("../app.js"),
   import("../config/swagger.js"),
 ]);
-const { isAllowedRegistrationTransition } =
+const { isAllowedRegistrationTransition, approvalYearInLagos, formatOfficialPlayerId, listRegistrations } =
   await import("../services/registrationService.js");
 const { ageGroupFor, ageOnDate, normalizePhone, pageOptions } =
   await import("../services/academyShared.js");
 const finance = await import("../services/paymentService.js");
+const publicIntakeService = await import("../services/publicIntakeService.js");
+const playerService = await import("../services/playerService.js");
+const adminResourceController = await import("../controllers/adminResourceController.js");
 const { manualPaymentBody } = await import("../validation/paymentSchemas.js");
+const { publicIntakeBody } = await import("../validation/publicIntakeSchemas.js");
+const { attendanceMarksBody } = await import("../validation/adminResourceSchemas.js");
 const { models, sequelize } = await import("../models/index.js");
+const { paymentRoutes, paymentVerificationLimiter, paystackWebhookLimiter } = await import("../routes/paymentRoutes.js");
+const { publicIntakeRoutes } = await import("../routes/publicIntakeRoutes.js");
 const notifications = await import("../services/notificationService.js");
 const notificationTemplates =
   await import("../services/notificationTemplates.js");
 const { originGuard } = await import("../middleware/originGuard.js");
 const { env } = await import("../config/env.js");
+const paymentController = await import("../controllers/paymentController.js");
 const { startNotificationOutboxWorker } = await import(
   "../services/notificationWorker.js"
 );
@@ -407,12 +472,12 @@ test("Swagger declares auth, academy, and finance routes", () => {
   ]) {
     assert.ok(paths[path], `missing OpenAPI path ${path}`);
   }
-  assert.equal(paths["/payments/initialize"], undefined);
-  assert.equal(paths["/payments/manual"], undefined);
-  assert.equal(paths["/registrations/{id}/balance"], undefined);
+  assert.ok(paths["/payments/initialize"]);
+  assert.ok(paths["/payments/manual"]);
+  assert.ok(paths["/registrations/{id}/profile-image"]);
 });
 
-test("payment endpoints are temporarily disabled", async (context) => {
+test("payment verification is registered before authentication while administrative payment endpoints remain protected", async (context) => {
   const server = app.listen(0);
   context.after(() => new Promise<void>((resolve, reject) =>
     server.close((error) => error ? reject(error) : resolve()),
@@ -421,12 +486,91 @@ test("payment endpoints are temporarily disabled", async (context) => {
   const address = server.address();
   assert.ok(address && typeof address !== "string");
   const base = `http://127.0.0.1:${address.port}/api/v1/payments`;
-  for (const [path, method] of [["", "GET"], ["/initialize", "POST"], ["/manual", "POST"], ["/verify/reference", "POST"], ["/refunds/id/approve", "POST"], ["/webhook/paystack", "POST"]]) {
+  for (const [path, method] of [["", "GET"], ["/initialize", "POST"], ["/manual", "POST"], ["/refunds/id/approve", "POST"], ["/webhook/paystack", "POST"]]) {
     const response = await fetch(`${base}${path}`, { method });
-    assert.equal(response.status, 503, `${method} ${path} must be disabled`);
+    assert.equal(response.status, 401, `${method} ${path} must reject unauthenticated access`);
     const payload = await response.json() as { error?: { code?: string } };
-    assert.equal(payload.error?.code, "FEATURE_DISABLED");
+    assert.equal(payload.error?.code, path === "/webhook/paystack" ? "INVALID_WEBHOOK_SIGNATURE" : "UNAUTHENTICATED");
   }
+  const routeStack = paymentRoutes.stack as unknown as RouteStackLayer[];
+  const verifyIndex = routeStack.findIndex((layer) => layer.route?.path === "/verify/:reference");
+  const authenticateIndex = routeStack.findIndex((layer) => !layer.route);
+  const webhookRoute = routeStack.find((layer) => layer.route?.path === "/webhook/paystack");
+  const verificationRoute = routeStack.find((layer) => layer.route?.path === "/verify/:reference");
+  assert.ok(verifyIndex >= 0);
+  assert.ok(authenticateIndex > verifyIndex);
+  assert.ok(webhookRoute?.route);
+  assert.ok(verificationRoute?.route);
+  assert.ok(webhookRoute.route.stack.some((layer) => layer.handle === paystackWebhookLimiter));
+  assert.ok(verificationRoute.route.stack.some((layer) => layer.handle === paymentVerificationLimiter));
+});
+
+test("Paystack webhook accepts exact raw-body signatures and never processes invalid signatures", async (context) => {
+  const server = app.listen(0);
+  context.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  let eventWrites = 0;
+  const tx = { LOCK: { UPDATE: "UPDATE" }, commit: async () => undefined, rollback: async () => undefined };
+  context.mock.method(sequelize, "transaction", async () => tx as never);
+  context.mock.method(models.Payment, "unscoped", () => models.Payment);
+  context.mock.method(models.Payment, "findOne", async () => null as never);
+  context.mock.method(models.PaymentEvent, "create", async (values: Record<string, unknown>) => {
+    eventWrites++;
+    return { ...values, id: "webhook-event", save: async () => undefined } as never;
+  });
+  context.mock.method(models.AuditLog, "create", async () => ({} as never));
+  const raw = '{ "event" : "charge.success", "data" : { "id" : 123, "reference" : "pay-ref" } }';
+  const timestamp = Math.floor(Date.now() / 1000);
+  const signature = createHmac("sha512", process.env.PAYSTACK_WEBHOOK_SECRET!)
+    .update(`${timestamp}.`)
+    .update(Buffer.from(raw))
+    .digest("hex");
+  const url = `http://127.0.0.1:${address.port}/api/v1/payments/webhook/paystack`;
+  const accepted = await fetch(url, {
+    method: "POST", headers: { "content-type": "application/json", "Paystack-Signature": `t=${timestamp},v1=whk_test-key:${signature}` }, body: raw,
+  });
+  assert.equal(accepted.status, 200);
+  const rejected = await fetch(url, {
+    method: "POST", headers: { "content-type": "application/json", "Paystack-Signature": `t=${timestamp},v1=whk_test-key:${"0".repeat(128)}` }, body: raw,
+  });
+  assert.equal(rejected.status, 401);
+  assert.equal(eventWrites, 1);
+});
+
+test("public payment verification rate limit permits normal traffic and rejects repeated requests", async (context) => {
+  paymentVerificationLimiter.resetKey("::ffff:127.0.0.1");
+  paymentVerificationLimiter.resetKey("127.0.0.1");
+  paymentVerificationLimiter.resetKey("::1");
+  const server = app.listen(0);
+  context.after(() => {
+    paymentVerificationLimiter.resetKey("::ffff:127.0.0.1");
+    paymentVerificationLimiter.resetKey("127.0.0.1");
+    paymentVerificationLimiter.resetKey("::1");
+    return new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  });
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  let verifications = 0;
+  context.mock.method(models.Payment, "unscoped", () => models.Payment);
+  context.mock.method(models.Payment, "findOne", async () => {
+    verifications++;
+    return null as never;
+  });
+  const url = `http://127.0.0.1:${address.port}/api/v1/payments/verify/public-ref`;
+  const responses: Response[] = [];
+  for (let index = 0; index < 13; index++) responses.push(await fetch(url, { method: "POST" }));
+  assert.equal(responses.slice(0, 12).every((response) => response.status === 404), true);
+  assert.equal(responses[12]?.status, 429);
+  assert.equal(verifications, 12);
+});
+
+test("official IDs use the Lagos approval year and six-digit sequence", () => {
+  assert.equal(approvalYearInLagos(new Date("2026-12-31T23:30:00.000Z")), 2027);
+  assert.equal(approvalYearInLagos(new Date("2027-01-01T00:00:00.000Z")), 2027);
+  assert.equal(formatOfficialPlayerId(2027, 123), "HTT-2027-000123");
 });
 
 test("finance calculations use integer minor units and reject malformed amounts", () => {
@@ -511,7 +655,8 @@ test("payment initialization uses registration fees, returns checkout URL, and r
   let existing: Record<string, unknown> | null = null;
   let transactionCommits = 0,
     providerCalls = 0,
-    initializedAmount = "";
+    initializedAmount = "",
+    initializedCallback = "";
   const tx = {
     LOCK: { UPDATE: "UPDATE" },
     commit: async () => {
@@ -540,10 +685,11 @@ test("payment initialization uses registration fees, returns checkout URL, and r
         childName: "Player",
         linkedPlayerId: "player-id",
         guardianId: "guardian-id",
-        programmeId: null,
+        programmeId: "programme-id",
         centreId: null,
       }) as never,
   );
+  context.mock.method(models.Programme, "findByPk", async () => ({ id: "programme-uuid", approvedFee: "85000.00", currency: "NGN", status: "active", availability: "open" }) as never);
   context.mock.method(
     models.Payment,
     "create",
@@ -570,7 +716,9 @@ test("payment initialization uses registration fees, returns checkout URL, and r
     "fetch",
     async (_url: RequestInfo | URL, init?: RequestInit) => {
       providerCalls++;
-      initializedAmount = JSON.parse(String(init?.body)).amount;
+      const requestBody = JSON.parse(String(init?.body));
+      initializedAmount = requestBody.amount;
+      initializedCallback = requestBody.callback_url;
       return new Response(
         JSON.stringify({
           status: true,
@@ -584,19 +732,319 @@ test("payment initialization uses registration fees, returns checkout URL, and r
     registrationId: "registration-id",
     idempotencyKey: "payment-request-001",
     purpose: "registration",
-  };
+  } as const;
   const first = await finance.initializePayment(input, "staff-id");
   const repeated = await finance.initializePayment(input, "staff-id");
   assert.equal(initializedAmount, "7550");
+  assert.equal(initializedCallback, "http://localhost:5173/payment/callback");
   assert.equal(first.authorizationUrl, "https://checkout.test/session");
   assert.equal(repeated.duplicate, true);
   assert.equal(repeated.authorizationUrl, first.authorizationUrl);
   assert.equal(providerCalls, 1);
   assert.equal(transactionCommits, 2);
+
+  existing = null;
+  const programmePayment = await finance.initializePayment({
+    registrationId: "registration-id",
+    idempotencyKey: "programme-fee-request-001",
+    purpose: "programme_fee",
+  }, "staff-id");
+  assert.equal(programmePayment.payment.amount, "85000.00");
+  assert.equal(programmePayment.payment.registrationId, "registration-id");
+  assert.equal(initializedAmount, "8500000");
+  assert.equal(initializedCallback, "http://localhost:5173/payment/callback");
+  assert.equal(providerCalls, 2);
 });
 
-test("server verification rejects mismatches and leaves pending responses unpaid until provider success", async (context) => {
+test("public registration resolves website slugs and creates one linked NGN 40,000 payment across retries", async (context) => {
+  let registration: RegistrationFixture | null = null;
+  let payment: PaymentFixture | null = null;
+  let pendingPlayer: PlayerFixture | null = null;
+  const registrationsByFingerprint = new Map<string, RegistrationFixture>();
+  const paymentsByIdempotencyKey = new Map<string, PaymentFixture>();
+  let registrationCreates = 0;
+  let playerCreates = 0;
+  let paymentCreates = 0;
+  let cloudinaryUploads = 0;
+  let paystackInitializations = 0;
+  let failNextPaystackInitialization = false;
+  let paystackRequest: unknown = null;
+  const currentRegistration = (): RegistrationFixture => registration as RegistrationFixture;
+  const currentPayment = (): PaymentFixture => payment as PaymentFixture;
+  const currentPendingPlayer = (): PlayerFixture => pendingPlayer as PlayerFixture;
+  const currentPaystackRequest = (): PaystackInitFixture => paystackRequest as PaystackInitFixture;
+  let centreSlug: string | undefined;
+  let programmeSlug: string | undefined;
+  const tx = {
+    LOCK: { UPDATE: "UPDATE" },
+    commit: async () => undefined,
+    rollback: async () => undefined,
+  };
+  context.mock.method(sequelize, "transaction", async (...args: unknown[]) => {
+    const callback = args[0];
+    return typeof callback === "function" ? callback(tx) : tx;
+  });
+  context.mock.method(models.Registration, "unscoped", () => models.Registration);
+  context.mock.method(models.Registration, "findOne", async (options: { where: Record<string, unknown> }) => registrationsByFingerprint.get(stringOption(options, "submissionFingerprint")) as never);
+  context.mock.method(models.Registration, "findByPk", async () => registration as never);
+  context.mock.method(models.Registration, "create", async (values: Record<string, unknown>) => {
+    registrationCreates++;
+    registration = {
+      ...values,
+      id: "registration-uuid",
+      reference: "HTT-REG-TEST",
+      status: "submitted",
+      update: async (changes: Record<string, unknown>) => Object.assign(registration as RegistrationFixture, changes),
+    } as RegistrationFixture;
+    registrationsByFingerprint.set(String(values.submissionFingerprint), registration as RegistrationFixture);
+    return registration as never;
+  });
+  context.mock.method(models.Centre, "findOne", async (options: { where: Record<string, unknown> }) => {
+    const slug = options.where.slug;
+    if (typeof slug === "string") centreSlug = slug;
+    return { id: "centre-uuid", name: "Magodo Lagos Training Centre", status: "open_for_registration", reviewStatus: "approved", proposedArea: false } as never;
+  });
+  context.mock.method(models.Centre, "findByPk", async () => ({ id: "centre-uuid", name: "Magodo Lagos Training Centre", status: "open_for_registration", reviewStatus: "approved", proposedArea: false }) as never);
+  context.mock.method(models.Programme, "findOne", async (options: { where: Record<string, unknown> }) => {
+    const slug = options.where.slug;
+    if (typeof slug === "string") programmeSlug = slug;
+    return { id: "programme-uuid", name: "Beginners", approvedFee: "85000.00", currency: "NGN", status: "active" } as never;
+  });
+  context.mock.method(models.Programme, "findByPk", async () => ({ id: "programme-uuid", approvedFee: "85000.00", currency: "NGN", status: "active", availability: "open" }) as never);
+  context.mock.method(models.CentreProgramme, "findOne", async () => ({ centreId: "centre-uuid", programmeId: "programme-uuid" }) as never);
+  context.mock.method(models.ApplicationSettings, "findOne", async () => null as never);
+  context.mock.method(models.MediaAsset, "create", async () => ({ id: "profile-asset-id" }) as never);
+  context.mock.method(models.Player, "unscoped", () => models.Player);
+  context.mock.method(models.Player, "create", async (values: Record<string, unknown>) => {
+    playerCreates++;
+    pendingPlayer = { ...values, id: "pending-player-id" } as PlayerFixture;
+    return pendingPlayer as never;
+  });
+  context.mock.method(models.EmergencyContact, "create", async (values: Record<string, unknown>) => values as never);
+  context.mock.method(models.RegistrationDocument, "create", async (values: Record<string, unknown>) => values as never);
+  context.mock.method(models.RegistrationStatusHistory, "create", async (values: Record<string, unknown>) => values as never);
+  context.mock.method(models.Payment, "unscoped", () => models.Payment);
+  context.mock.method(models.Payment, "findOne", async (options: { where: Record<string, unknown> }) => paymentsByIdempotencyKey.get(stringOption(options, "idempotencyKey")) as never);
+  context.mock.method(models.Payment, "findAll", async () => [] as never);
+  context.mock.method(models.Payment, "create", async (values: Record<string, unknown>) => {
+    paymentCreates++;
+    payment = {
+      ...values,
+      id: "payment-uuid",
+      metadata: {},
+      update: async (changes: Record<string, unknown>) => Object.assign(payment as PaymentFixture, changes),
+      save: async () => undefined,
+    } as PaymentFixture;
+    paymentsByIdempotencyKey.set(String(values.idempotencyKey), payment as PaymentFixture);
+    return payment as never;
+  });
+  context.mock.method(models.AuditLog, "create", async (values: Record<string, unknown>) => values as never);
+  context.mock.method(models.NotificationOutbox, "create", async (values: Record<string, unknown>) => values as never);
+  context.mock.method(globalThis, "fetch", async (url: RequestInfo | URL, init?: RequestInit) => {
+    const target = String(url);
+    if (target.includes("api.cloudinary.com")) {
+      cloudinaryUploads++;
+      return new Response(JSON.stringify({
+        public_id: "htt-academy-private/registration-profiles/test-image",
+        secure_url: "https://res.cloudinary.com/htt-unit-test-cloud/image/authenticated/test-image",
+        bytes: 5,
+        type: "authenticated",
+      }), { status: 200 });
+    }
+    if (target === "https://api.paystack.co/transaction/initialize") {
+      paystackInitializations++;
+      paystackRequest = JSON.parse(String(init?.body));
+      if (failNextPaystackInitialization) {
+        failNextPaystackInitialization = false;
+        throw new Error("simulated provider timeout");
+      }
+      return new Response(JSON.stringify({ status: true, data: { authorization_url: "https://checkout.test/public-registration" } }), { status: 200 });
+    }
+    throw new Error(`Unexpected outbound request in test: ${target}`);
+  });
+
+  const input = {
+    agreeTerms: true,
+    centre: { name: "Centre label from website", uuid: "magodo" },
+    programme: { title: "Programme label from website", uuid: "ogudu-programme-1", baseFee: 85000 },
+    payment: { frequency: "registration", fee: 40000 },
+    player: { name: "Public Player", gender: "female", dob: "2012-03-04", school: "", className: "", positionUuid: "" },
+    guardian: { name: "Guardian", relationship: "mother", phone: "+2348012345678", email: "guardian@example.test", address: "", alternativePhone: "" },
+    emergencyContact: { name: "Emergency", phone: "+2348098765432" },
+    consentMedical: true,
+  } as const;
+  const image = { buffer: Buffer.from([0xff, 0xd8, 0xff, 0x00, 0x01]), mimeType: "image/jpeg" as const, originalName: "player.jpg" };
+  const first = await publicIntakeService.submitPublicRegistration(input, "127.0.0.1", image);
+  const retry = await publicIntakeService.submitPublicRegistration(input, "127.0.0.1", image);
+
+  assert.equal(centreSlug, "magodo");
+  assert.equal(programmeSlug, "ogudu-programme-1");
+  assert.equal(registrationCreates, 1);
+  assert.equal(playerCreates, 1);
+  assert.equal(paymentCreates, 1);
+  assert.equal(cloudinaryUploads, 1);
+  assert.equal(paystackInitializations, 1);
+  assert.equal(currentRegistration().centreId, "centre-uuid");
+  assert.equal(currentRegistration().programmeId, "programme-uuid");
+  assert.equal(currentRegistration().amountDue, 40000);
+  assert.equal(currentRegistration().amountDueCurrency, "NGN");
+  assert.equal(currentRegistration().consentMedical, true);
+  assert.equal(currentRegistration().consentData, false);
+  assert.equal(currentRegistration().publicPayload?.agreeTerms, true);
+  assert.equal(currentRegistration().centreNameSnapshot, "Magodo Lagos Training Centre");
+  assert.equal(currentRegistration().programmeTitleSnapshot, "Beginners");
+  assert.equal(currentRegistration().programmeBaseFeeSubmitted, 85000);
+  assert.equal(currentRegistration().linkedPlayerId, "pending-player-id");
+  assert.equal(currentPendingPlayer().registrationStatus, "pending");
+  assert.equal(currentPendingPlayer().officialPlayerId, null);
+  assert.equal(currentRegistration().submissionFingerprint?.length, 64);
+  assert.equal(currentPayment().registrationId, "registration-uuid");
+  assert.equal(currentPayment().amount, "40000.00");
+  assert.equal(currentPayment().currency, "NGN");
+  assert.equal(currentPayment().status, "pending");
+  assert.equal(env.PAYSTACK_CALLBACK_URL, "http://localhost:5173/payment/callback");
+  assert.equal(currentPaystackRequest().amount, "4000000");
+  assert.equal(currentPaystackRequest().currency, "NGN");
+  assert.equal(currentPaystackRequest().callback_url, "http://localhost:5173/payment/callback");
+  assert.equal(currentPaystackRequest().metadata?.registration_id, "registration-uuid");
+  assert.equal(first.registrationId, "registration-uuid");
+  assert.equal(first.paymentReference, currentPayment().reference);
+  assert.equal(first.payment.reference, currentPayment().reference);
+  assert.equal(first.payment.authorizationUrl, "https://checkout.test/public-registration");
+  assert.equal(retry.duplicate, true);
+  assert.equal(retry.payment.duplicate, true);
+  assert.equal(retry.payment.authorizationUrl, first.payment.authorizationUrl);
+
+  const timedOutInput = { ...input, player: { ...input.player, name: "Timeout Retry Player" } };
+  failNextPaystackInitialization = true;
+  let timedOutDetails: Record<string, unknown> = {};
+  await assert.rejects(
+    publicIntakeService.submitPublicRegistration(timedOutInput, "127.0.0.1", image),
+    (error: unknown) => {
+      if (!error || typeof error !== "object") return false;
+      const failure = error as { statusCode?: number; code?: string; details?: unknown };
+      timedOutDetails = failure.details && typeof failure.details === "object" ? failure.details as Record<string, unknown> : {};
+      return failure.statusCode === 503 && failure.code === "PAYMENT_INITIALIZATION_UNKNOWN";
+    },
+  );
+  let recoveredDetails: Record<string, unknown> = {};
+  await assert.rejects(
+    publicIntakeService.submitPublicRegistration(timedOutInput, "127.0.0.1", image),
+    (error: unknown) => {
+      if (!error || typeof error !== "object") return false;
+      const failure = error as { statusCode?: number; code?: string; details?: unknown };
+      recoveredDetails = failure.details && typeof failure.details === "object" ? failure.details as Record<string, unknown> : {};
+      return failure.statusCode === 503 && failure.code === "PAYMENT_INITIALIZATION_UNKNOWN";
+    },
+  );
+  assert.equal(timedOutDetails.registrationId, "registration-uuid");
+  assert.equal(timedOutDetails.paymentReference, currentPayment().reference);
+  assert.equal(timedOutDetails.needsVerification, true);
+  assert.equal(recoveredDetails.duplicate, true);
+  assert.equal(recoveredDetails.registrationId, timedOutDetails.registrationId);
+  assert.equal(recoveredDetails.paymentReference, timedOutDetails.paymentReference);
+  assert.equal(recoveredDetails.needsVerification, true);
+  assert.equal(registrationCreates, 2);
+  assert.equal(playerCreates, 2);
+  assert.equal(paymentCreates, 2);
+  assert.equal(cloudinaryUploads, 2);
+  assert.equal(paystackInitializations, 2);
+
+  const legacyInput = {
+    child_name: "Legacy Player", guardian_name: "Legacy Guardian", guardian_phone: "+2348012345678",
+    guardian_email: "legacy@example.test", guardian_address: "", child_date_of_birth: "2013-02-01",
+    centre_id: "550e8400-e29b-41d4-a716-446655440000", programme_id: "550e8400-e29b-41d4-a716-446655440001",
+    age_group: "11-12", pathway: "paid_academy", consent_data: true,
+  } as const;
+  const legacyParsed = publicIntakeBody.safeParse({ action: "submit_registration", registration: legacyInput });
+  assert.equal(legacyParsed.success, true);
+  const legacyFirst = await publicIntakeService.submitPublicRegistration(legacyInput, "127.0.0.1");
+  const legacyRetry = await publicIntakeService.submitPublicRegistration(legacyInput, "127.0.0.1");
+  assert.equal(legacyFirst.payment.authorizationUrl, "https://checkout.test/public-registration");
+  assert.equal(legacyRetry.duplicate, true);
+  assert.equal(registrationCreates, 3);
+  assert.equal(paymentCreates, 3);
+  assert.equal(paystackInitializations, 3);
+
+  const legacyTimeout = { ...legacyInput, child_name: "Legacy Timeout Player" };
+  failNextPaystackInitialization = true;
+  await assert.rejects(publicIntakeService.submitPublicRegistration(legacyTimeout, "127.0.0.1"), { statusCode: 503, code: "PAYMENT_INITIALIZATION_UNKNOWN" });
+  await assert.rejects(publicIntakeService.submitPublicRegistration(legacyTimeout, "127.0.0.1"), { statusCode: 503, code: "PAYMENT_INITIALIZATION_UNKNOWN" });
+  assert.equal(registrationCreates, 4);
+  assert.equal(paymentCreates, 4);
+  assert.equal(paystackInitializations, 4);
+});
+
+test("public payment summary reloads the existing checkout details without exposing contact data or creating payments", async (context) => {
+  assert.ok((publicIntakeRoutes.stack as unknown as RouteStackLayer[]).some((layer) => layer.route?.path === "/payments/:reference" && layer.route.methods?.get));
+  const payment = {
+    id: "payment-uuid",
+    reference: "HTT-PAY-TEST-REFERENCE-123456",
+    registrationId: "registration-uuid",
+    method: "paystack",
+    purpose: "registration",
+    amount: "40000.00",
+    currency: "NGN",
+    status: "pending",
+    providerStatus: "initialized",
+    verifiedAt: null,
+    metadata: { checkoutUrl: "https://checkout.test/existing-session", guardianEmail: "private@example.test" },
+  };
+  let paymentCreates = 0;
+  context.mock.method(models.Payment, "unscoped", () => models.Payment);
+  context.mock.method(models.Payment, "findOne", async () => payment as never);
+  context.mock.method(models.Payment, "create", async () => { paymentCreates++; return payment as never; });
+  context.mock.method(models.Registration, "unscoped", () => models.Registration);
+  context.mock.method(models.Registration, "findByPk", async () => ({
+    id: "registration-uuid", childName: "Player Name", centreId: "centre-uuid", programmeId: "programme-uuid",
+    guardianEmail: "private@example.test", guardianPhone: "+2348000000000",
+  }) as never);
+  context.mock.method(models.Centre, "findByPk", async () => ({ name: "Magodo Lagos Training Centre" }) as never);
+  context.mock.method(models.Programme, "findByPk", async () => ({ name: "Beginners" }) as never);
+
+  const summary = await publicIntakeService.getPublicPaymentSummary(payment.reference);
+  assert.deepEqual(summary, {
+    registration: { id: "registration-uuid", playerName: "Player Name", centreName: "Magodo Lagos Training Centre", programmeName: "Beginners" },
+    payment: { reference: payment.reference, amount: "40000.00", currency: "NGN", status: "pending", providerStatus: "initialized", verifiedAt: null, authorizationUrl: "https://checkout.test/existing-session" },
+  });
+  assert.equal(JSON.stringify(summary).includes("private@example.test"), false);
+  assert.equal(JSON.stringify(summary).includes("+2348000000000"), false);
+  assert.equal(paymentCreates, 0);
+  await assert.rejects(publicIntakeService.getPublicPaymentSummary("short"), { code: "INVALID_PAYMENT_REFERENCE" });
+});
+
+test("public selection resolver rejects unknown centre and programme slugs", async (context) => {
+  let centreResult: { id: string; name: string } | null = { id: "centre-uuid", name: "Magodo Lagos Training Centre" };
+  let programmeResult: { id: string; availability: string } | null = null;
+  context.mock.method(models.Centre, "findOne", async () => centreResult as never);
+  context.mock.method(models.Programme, "findOne", async () => programmeResult as never);
+  context.mock.method(models.CentreProgramme, "findOne", async () => ({ centreId: "centre-uuid", programmeId: "programme-uuid" }) as never);
+
+  centreResult = null;
+  await assert.rejects(publicIntakeService.resolvePublicSelections("unknown-centre", "ogudu-programme-1"), { code: "INVALID_CENTRE" });
+  centreResult = { id: "centre-uuid", name: "Magodo Lagos Training Centre" };
+  await assert.rejects(publicIntakeService.resolvePublicSelections("magodo", "unknown-programme"), { code: "INVALID_PROGRAMME" });
+  programmeResult = { id: "programme-uuid", availability: "closed" };
+  await assert.rejects(publicIntakeService.resolvePublicSelections("magodo", "ogudu-programme-1"), { code: "PROGRAMME_UNAVAILABLE" });
+  programmeResult = { id: "programme-uuid", availability: "open" };
+  assert.deepEqual(await publicIntakeService.resolvePublicSelections("magodo", "ogudu-programme-1"), { centreId: "centre-uuid", programmeId: "programme-uuid" });
+});
+
+test("both public registration request shapes require approval fields and payer details", () => {
+  const legacy = {
+    child_name: "Legacy Player", guardian_name: "Guardian", guardian_phone: "+2348012345678",
+    guardian_email: "guardian@example.test", child_date_of_birth: "2012-03-04",
+    centre_id: "550e8400-e29b-41d4-a716-446655440000", programme_id: "550e8400-e29b-41d4-a716-446655440001",
+  };
+  assert.equal(publicIntakeBody.safeParse({ action: "submit_registration", registration: legacy }).success, true);
+  assert.equal(publicIntakeBody.safeParse({ action: "submit_registration", registration: { ...legacy, child_date_of_birth: undefined } }).success, false);
+  assert.equal(publicIntakeBody.safeParse({ action: "submit_registration", registration: { ...legacy, guardian_email: "" } }).success, false);
+  assert.equal(publicIntakeBody.safeParse({ action: "submit_registration", registration: { ...legacy, programme_id: "" } }).success, false);
+});
+
+test("registration verification matches NGN naira records to Paystack kobo and keeps unsuccessful payments unpaid", async (context) => {
   let providerState: Record<string, unknown> = {
+    id: 987654,
     reference: "provider-ref",
     amount: 2000,
     currency: "NGN",
@@ -604,6 +1052,7 @@ test("server verification rejects mismatches and leaves pending responses unpaid
     customer: { email: "guardian@example.com" },
   };
   let commits = 0;
+  let paymentCreates = 0;
   const tx = {
     LOCK: { UPDATE: "UPDATE" },
     commit: async () => {
@@ -611,24 +1060,42 @@ test("server verification rejects mismatches and leaves pending responses unpaid
     },
     rollback: async () => undefined,
   };
-  const payment = {
+  const payment: PaymentFixture & {
+    gatewayReference: string; amount: string; currency: string; payerEmail: string;
+    method: string; refundAmount: string; receiptNumber: string | null;
+    registrationId: string; providerTransactionId?: string; verifiedAmount?: string;
+    verifiedCurrency?: string;
+  } = {
     id: "payment-id",
     reference: "internal-ref",
     gatewayReference: "provider-ref",
-    amount: "25.00",
+    amount: "40000.00",
     currency: "NGN",
     payerEmail: "guardian@example.com",
     method: "paystack",
     status: "pending",
     refundAmount: "0.00",
     receiptNumber: null,
-    registrationId: null,
+    registrationId: "registration-id",
     save: async () => undefined,
+  };
+  const registration = {
+    id: "registration-id",
+    amountDue: "40000.00",
+    amountDueCurrency: "NGN",
+    paymentStatus: "unpaid",
+    save: async () => undefined,
+    toJSON: () => ({ id: registration.id, paymentStatus: registration.paymentStatus }),
   };
   context.mock.method(sequelize, "transaction", async () => tx as never);
   context.mock.method(models.Payment, "unscoped", () => models.Payment);
   context.mock.method(models.Payment, "findOne", async () => payment as never);
   context.mock.method(models.Payment, "findByPk", async () => payment as never);
+  context.mock.method(models.Payment, "findAll", async () => [payment] as never);
+  context.mock.method(models.Payment, "create", async () => { paymentCreates++; return payment as never; });
+  context.mock.method(models.Registration, "unscoped", () => models.Registration);
+  context.mock.method(models.Registration, "findByPk", async () => registration as never);
+  context.mock.method(models.Registration, "findAndCountAll", async () => ({ rows: [registration], count: 1 }) as never);
   context.mock.method(models.AuditLog, "create", async () => ({}) as never);
   context.mock.method(
     models.NotificationOutbox,
@@ -646,15 +1113,49 @@ test("server verification rejects mismatches and leaves pending responses unpaid
   await assert.rejects(finance.verifyPayment("provider-ref", "staff-id"), {
     code: "AMOUNT_MISMATCH",
   });
-  providerState = { ...providerState, amount: 2500 };
+  providerState = { ...providerState, amount: 4_000_000 };
   const pending = await finance.verifyPayment("provider-ref", "staff-id");
   assert.equal(pending.status, "pending");
   assert.equal(payment.status, "pending");
+  assert.equal(registration.paymentStatus, "unpaid");
+  providerState = { ...providerState, status: "failed" };
+  const failed = await finance.verifyPayment("provider-ref", "staff-id");
+  assert.equal(failed.status, "failed");
+  assert.equal(registration.paymentStatus, "unpaid");
+  payment.status = "pending";
+  providerState = { ...providerState, status: "abandoned" };
+  const abandoned = await finance.verifyPayment("provider-ref", "staff-id");
+  assert.equal(abandoned.status, "cancelled");
+  assert.equal(payment.status, "cancelled");
+  payment.status = "pending";
+  const unpaidAdminRegistrations = await listRegistrations({}, { playerData: false, guardianData: false, internal: false });
+  assert.equal(unpaidAdminRegistrations.items[0]?.paymentStatus, "unpaid");
   providerState = { ...providerState, status: "success" };
   const successful = await finance.verifyPayment("provider-ref", "staff-id");
   assert.equal(successful.status, "successful");
+  assert.equal(successful.status, "successful", "the verification data.status contract is the public callback's success signal");
   assert.ok(successful.receiptNumber);
-  assert.equal(commits, 2);
+  assert.equal(payment.providerTransactionId, "987654");
+  assert.equal(payment.verifiedAmount, "40000.00");
+  assert.equal(payment.verifiedCurrency, "NGN");
+  assert.equal(payment.verificationDetails?.status, "success");
+  assert.equal(registration.paymentStatus, "paid");
+  let verifyResponse: { success?: unknown; data?: { status?: unknown } } | undefined;
+  await new Promise<void>((resolve, reject) => {
+    paymentController.verify(
+      { params: { reference: "provider-ref" }, ip: "127.0.0.1" } as unknown as Request,
+      { json: (body: unknown) => { verifyResponse = body as { success?: unknown; data?: { status?: unknown } }; resolve(); } } as unknown as ExpressResponse,
+      reject,
+    );
+  });
+  assert.equal(verifyResponse?.success, true);
+  assert.equal(verifyResponse?.data?.status, "successful");
+  const adminRegistrations = await listRegistrations({}, { playerData: false, guardianData: false, internal: false });
+  assert.equal(adminRegistrations.items[0]?.paymentStatus, "paid");
+  await finance.verifyPayment("provider-ref", "staff-id");
+  assert.equal(paymentCreates, 0);
+  assert.equal(registration.paymentStatus, "paid");
+  assert.equal(commits, 6);
 });
 
 test("refund requests reserve amounts and reject excessive retries", async (context) => {
@@ -745,6 +1246,214 @@ test("duplicate provider webhook delivery is acknowledged once", async (context)
   });
   assert.equal(commits, 1);
   assert.equal(rollbacks, 1);
+});
+
+test("webhook event identities are stable, distinguish payload changes, and reject sparse events", () => {
+  const first = { event: "refund.pending", data: { transaction_reference: "transaction-1", amount: "500", status: "pending" } };
+  assert.equal(finance.paystackWebhookEventId(first), finance.paystackWebhookEventId(JSON.parse(JSON.stringify(first))));
+  assert.notEqual(finance.paystackWebhookEventId(first), finance.paystackWebhookEventId({ ...first, data: { ...first.data, amount: "600" } }));
+  assert.equal(finance.paystackWebhookEventId({ event: "charge.success", data: { id: 123 } }), "charge.success:123");
+  assert.equal(finance.paystackWebhookEventId({ event: "ping" }), "ping");
+  assert.throws(() => finance.paystackWebhookEventId({ event: "charge.success" }), { code: "INVALID_WEBHOOK" });
+  assert.throws(() => finance.paystackWebhookEventId({ event: "charge.success", data: {} }), { code: "WEBHOOK_IDENTITY_MISSING" });
+});
+
+test("refund webhook matching uses provider references and quarantines ambiguous amounts", () => {
+  const candidates = [
+    { id: "refund-a", reference: "HTT-REF-A", gatewayReference: "101", providerRefundReference: "provider-a", amount: "5.00" },
+    { id: "refund-b", reference: "HTT-REF-B", gatewayReference: "102", providerRefundReference: "provider-b", amount: "5.00" },
+  ];
+  assert.equal(finance.matchPaystackRefund(candidates, { refund_reference: "provider-b", amount: "500" }).refund?.id, "refund-b");
+  assert.deepEqual(finance.matchPaystackRefund(candidates, { amount: "500" }), { refund: null, ambiguous: true });
+  assert.deepEqual(finance.matchPaystackRefund(candidates, { refund_reference: "unknown", amount: "500" }), { refund: null, ambiguous: false });
+  assert.deepEqual(finance.matchPaystackRefund(candidates, { amount: "invalid" }), { refund: null, ambiguous: true });
+});
+
+test("unmatched refund webhooks are retained for reconciliation without changing a refund", async (context) => {
+  let eventRecord: { processingStatus: string; payload: Record<string, unknown> } | undefined;
+  let delivered = false;
+  let auditWrites = 0;
+  let commits = 0;
+  let rollbacks = 0;
+  const tx = { LOCK: { UPDATE: "UPDATE" }, commit: async () => { commits++; }, rollback: async () => { rollbacks++; } };
+  context.mock.method(sequelize, "transaction", async () => tx as never);
+  context.mock.method(models.Payment, "unscoped", () => models.Payment);
+  context.mock.method(models.Payment, "findOne", async () => null as never);
+  context.mock.method(models.PaymentEvent, "create", async (values: Record<string, unknown>) => {
+    if (delivered) {
+      const error = new Error("duplicate webhook identity");
+      error.name = "SequelizeUniqueConstraintError";
+      throw error;
+    }
+    delivered = true;
+    eventRecord = { ...values, id: "event-row", save: async () => undefined } as unknown as { processingStatus: string; payload: Record<string, unknown> };
+    return eventRecord as never;
+  });
+  context.mock.method(models.AuditLog, "create", async () => { auditWrites++; return {} as never; });
+  const result = await finance.processPaystackWebhook({
+    event: "refund.pending",
+    data: { transaction_reference: "missing-payment", refund_reference: null, amount: "500", currency: "NGN", status: "pending" },
+  });
+  assert.equal(result.received, true);
+  assert.equal((await finance.processPaystackWebhook({
+    event: "refund.pending",
+    data: { transaction_reference: "missing-payment", refund_reference: null, amount: "500", currency: "NGN", status: "pending" },
+  })).duplicate, true);
+  assert.equal(eventRecord?.processingStatus, "needs_reconciliation");
+  assert.equal(eventRecord?.payload.reference, "missing-payment");
+  assert.equal(auditWrites, 1);
+  assert.equal(commits, 1);
+  assert.equal(rollbacks, 1);
+});
+
+test("attendance rejects duplicate player IDs and counts persisted unique records", async (context) => {
+  type AttendanceRecordMock = {
+    playerId: string;
+    status: string;
+    sessionId?: string;
+    notes?: string | null;
+    update: (data: Record<string, unknown>) => Promise<unknown>;
+  };
+  type AttendanceSessionMock = {
+    id: string;
+    centreId: string;
+    status: string;
+    presentCount?: number;
+    absentCount?: number;
+    update: (data: Record<string, unknown>) => Promise<unknown>;
+  };
+  const playerOne = "550e8400-e29b-41d4-a716-446655440001";
+  const playerTwo = "550e8400-e29b-41d4-a716-446655440002";
+  const playerThree = "550e8400-e29b-41d4-a716-446655440003";
+  const validInput = { records: [
+    { playerId: playerTwo, status: "present" },
+    { playerId: playerThree, status: "late" },
+  ] };
+  assert.equal(attendanceMarksBody.safeParse(validInput).success, true);
+  assert.equal(attendanceMarksBody.safeParse({ records: [...validInput.records, { playerId: playerTwo, status: "absent" }] }).success, false);
+
+  const persisted = new Map<string, AttendanceRecordMock>();
+  const existing: AttendanceRecordMock = { playerId: playerOne, status: "absent", update: async (data) => Object.assign(existing, data) };
+  persisted.set(playerOne, existing);
+  const session: AttendanceSessionMock = {
+    id: "session-id", centreId: "centre-id", status: "scheduled",
+    update: async (data) => Object.assign(session, data),
+  };
+  const tx = { LOCK: { UPDATE: "UPDATE" } };
+  context.mock.method(sequelize, "transaction", async (callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx));
+  context.mock.method(models.AttendanceSession, "findByPk", async () => session as never);
+  context.mock.method(models.Player, "findAll", async () => [playerTwo, playerThree].map((id) => ({ id })) as never);
+  context.mock.method(models.AttendanceRecord, "findOrCreate", async (options: { where: { playerId: string }; defaults: { playerId: string; status: string; sessionId: string; notes?: string | null } }) => {
+    let row = persisted.get(options.where.playerId);
+    const created = !row;
+    if (!row) {
+      const createdRow: AttendanceRecordMock = {
+        playerId: options.defaults.playerId,
+        status: options.defaults.status,
+        sessionId: options.defaults.sessionId,
+        notes: options.defaults.notes,
+        update: async (data) => Object.assign(createdRow, data),
+      };
+      row = createdRow;
+      persisted.set(options.where.playerId, row);
+    }
+    if (!created) await row.update(options.defaults);
+    return [row, created] as never;
+  });
+  context.mock.method(models.AttendanceRecord, "findAll", async () => [...persisted.values()] as never);
+  context.mock.method(models.AuditLog, "create", async () => ({} as never));
+  const req = { params: { id: "session-id" }, body: validInput, auth: { staffId: "staff-id" }, ip: "127.0.0.1", get: () => "test" } as unknown as Request;
+  await new Promise<void>((resolve, reject) => {
+    const response = { json: () => { resolve(); return response; } } as unknown as ExpressResponse;
+    adminResourceController.saveAttendanceMarks(req, response, reject);
+  });
+  assert.equal(session.presentCount, 2);
+  assert.equal(session.absentCount, 1);
+  assert.equal(persisted.size, 3);
+});
+
+test("attendance deletion rolls back if its required audit record cannot be written", async (context) => {
+  let destroyed = false;
+  let committed = false;
+  let rolledBack = false;
+  const tx = { LOCK: { UPDATE: "UPDATE" } };
+  context.mock.method(sequelize, "transaction", async (callback: (transaction: typeof tx) => Promise<unknown>) => {
+    try {
+      const result = await callback(tx as never);
+      committed = true;
+      return result;
+    } catch (error) {
+      rolledBack = true;
+      throw error;
+    }
+  });
+  context.mock.method(models.AttendanceSession, "findByPk", async () => ({ destroy: async () => { destroyed = true; } }) as never);
+  context.mock.method(models.AuditLog, "create", async () => { throw new Error("audit storage unavailable"); });
+  const req = { params: { id: "session-id" }, auth: { staffId: "staff-id" }, ip: "127.0.0.1", get: () => "test" } as unknown as Request;
+  await assert.rejects(new Promise<void>((resolve, reject) => {
+    const response = { json: () => { resolve(); return response; } } as unknown as ExpressResponse;
+    adminResourceController.deleteAdminResource("AttendanceSession")(req, response, reject);
+  }));
+  assert.equal(destroyed, true);
+  assert.equal(committed, false);
+  assert.equal(rolledBack, true);
+});
+
+test("authorized manual player creation is audited separately and does not claim payment verification", async (context) => {
+  const tx = { LOCK: { UPDATE: "UPDATE" } };
+  let createdValues: Record<string, unknown> = {};
+  let auditValues: Record<string, unknown> = {};
+  const createdPlayer: Record<string, unknown> = {
+    id: "manual-player-id", playerCode: "HTT-P-TEST", fullName: "Manual Player", dateOfBirth: "2012-01-01",
+    ageGroup: "11-12", registrationStatus: "registered", archived: false, registrationId: null,
+  };
+  context.mock.method(sequelize, "transaction", async (callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx));
+  context.mock.method(sequelize, "query", async () => [] as never);
+  context.mock.method(models.ApplicationSettings, "findOne", async () => null as never);
+  context.mock.method(models.Player, "unscoped", () => models.Player);
+  context.mock.method(models.Player, "findOne", async () => null as never);
+  context.mock.method(models.Player, "create", async (values: Record<string, unknown>) => {
+    createdValues = values;
+    return createdPlayer as never;
+  });
+  context.mock.method(models.Player, "findByPk", async () => createdPlayer as never);
+  context.mock.method(models.PlayerGuardian, "findAll", async () => [] as never);
+  context.mock.method(models.Registration, "unscoped", () => models.Registration);
+  context.mock.method(models.Registration, "findAll", async () => [] as never);
+  context.mock.method(models.AuditLog, "create", async (values: Record<string, unknown>) => {
+    auditValues = values;
+    return {} as never;
+  });
+  const created = await playerService.createPlayer({ fullName: "Manual Player", dateOfBirth: "2012-01-01", registrationStatus: "registered" }, "staff-id", true);
+  assert.equal(createdValues.registrationStatus, "registered");
+  assert.equal(createdValues.registrationId, undefined);
+  assert.equal(created.registrationId, null);
+  assert.equal(auditValues.action, "player.manually_created");
+  assert.match(String(auditValues.details), /paymentVerification:not_performed/);
+});
+
+test("player status transitions block unapproved registration-linked changes and unlinked activation", async (context) => {
+  type PlayerStatusMock = {
+    id: string;
+    registrationId: string | null;
+    registrationStatus: string;
+    archived?: boolean;
+    archivedReason?: string | null;
+    update: (data: Record<string, unknown>) => Promise<unknown>;
+  };
+  const tx = { LOCK: { UPDATE: "UPDATE" } };
+  let player: PlayerStatusMock = { id: "player-id", registrationId: "registration-id", registrationStatus: "pending", update: async (data) => Object.assign(player, data) };
+  context.mock.method(sequelize, "transaction", async (callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx));
+  context.mock.method(models.Player, "findByPk", async () => player as never);
+  context.mock.method(models.Registration, "findByPk", async () => ({ status: "submitted" }) as never);
+  await assert.rejects(playerService.updatePlayerStatus("player-id", { registrationStatus: "registered" }, "staff-id"), { code: "INVALID_PLAYER_STATUS_TRANSITION" });
+  await assert.rejects(playerService.updatePlayerStatus("player-id", { registrationStatus: "archived" }, "staff-id"), { code: "INVALID_PLAYER_STATUS_TRANSITION" });
+  player = { id: "player-id", registrationId: null, registrationStatus: "prospective", update: async (data) => Object.assign(player, data) };
+  await assert.rejects(playerService.updatePlayerStatus("player-id", { registrationStatus: "registered" }, "staff-id"), { code: "REGISTRATION_APPROVAL_REQUIRED" });
+  context.mock.method(models.AuditLog, "create", async () => ({} as never));
+  const changed = await playerService.updatePlayerStatus("player-id", { registrationStatus: "waitlisted" }, "staff-id");
+  assert.equal(changed.registrationStatus, "waitlisted");
+  assert.equal(player.archived, false);
 });
 
 test("receipt data omits payer and player names without their sensitive permissions", async (context) => {
@@ -1085,13 +1794,39 @@ test("manual payments commit once and roll back if allocation persistence fails"
   assert.equal(rollbacks, 1);
 });
 
-test("Paystack webhook signature uses HMAC SHA-512 and provider checks bind reference, amount, currency, and payer", () => {
-  const body = Buffer.from('{"event":"charge.success"}');
+test("Paystack accepts only valid legacy and timestamped signatures and binds provider payment details", () => {
+  const body = Buffer.from('{ "event" : "charge.success", "data" : {"reference":"pay-ref"} }');
   const signature = createHmac("sha512", process.env.PAYSTACK_SECRET_KEY!)
     .update(body)
     .digest("hex");
   assert.equal(finance.verifyWebhookSignature(body, signature), true);
   assert.equal(finance.verifyWebhookSignature(body, "bad"), false);
+  assert.equal(finance.verifyWebhookSignature(body, `0x${signature}`), false);
+  const timestamp = 1_800_000_000;
+  const webhookSecret = process.env.PAYSTACK_WEBHOOK_SECRET!;
+  const makeSignature = (time: number) => createHmac("sha512", webhookSecret)
+    .update(`${time}.`)
+    .update(body)
+    .digest("hex");
+  const verifyHeaders = (time: number, header: string, currentTime = time) =>
+    finance.verifyWebhookSignature(body, undefined, header, currentTime);
+  const modernSignature = `t=${timestamp},v1=whk_test-key:${makeSignature(timestamp)}`;
+  assert.equal(verifyHeaders(timestamp, modernSignature), true);
+  assert.equal(verifyHeaders(timestamp, `t=${timestamp},v1=whk_old-key:${"0".repeat(128)},v1=whk_test-key:${makeSignature(timestamp)}`), true);
+  assert.equal(verifyHeaders(timestamp, `t=${timestamp},v1=whk_test-key:${"0".repeat(128)}`), false);
+  assert.equal(verifyHeaders(timestamp, `t=${timestamp - 301},v1=whk_test-key:${makeSignature(timestamp - 301)}`, timestamp), false);
+  assert.equal(verifyHeaders(timestamp, `t=${timestamp + 301},v1=whk_test-key:${makeSignature(timestamp + 301)}`, timestamp), false);
+  assert.equal(verifyHeaders(timestamp, `t=${timestamp},v1=broken`), false);
+  assert.equal(finance.verifyWebhookSignature(body, undefined, undefined), false);
+  assert.equal(finance.verifyWebhookSignature(undefined, signature), false);
+  const savedSecret = env.PAYSTACK_WEBHOOK_SECRET;
+  env.PAYSTACK_WEBHOOK_SECRET = "";
+  try {
+    assert.equal(verifyHeaders(timestamp, modernSignature), false);
+    assert.equal(finance.verifyWebhookSignature(body, signature), true);
+  } finally {
+    env.PAYSTACK_WEBHOOK_SECRET = savedSecret;
+  }
   const payment = {
     gatewayReference: "pay-ref",
     reference: "internal-ref",
@@ -1102,7 +1837,8 @@ test("Paystack webhook signature uses HMAC SHA-512 and provider checks bind refe
   assert.doesNotThrow(() =>
     finance.assertProviderTransactionMatches(payment, {
       reference: "pay-ref",
-      amount: 2500,
+      amount: 2571,
+      requested_amount: 2500,
       currency: "NGN",
       customer: { email: "guardian@example.com" },
     }),
@@ -1112,6 +1848,29 @@ test("Paystack webhook signature uses HMAC SHA-512 and provider checks bind refe
       reference: "pay-ref",
       amount: 250,
       currency: "NGN",
+      customer: { email: "guardian@example.com" },
+    }),
+  );
+  assert.throws(() =>
+    finance.assertProviderTransactionMatches(payment, {
+      reference: "pay-ref",
+      amount: 2571,
+      requested_amount: 2501,
+      currency: "NGN",
+      customer: { email: "guardian@example.com" },
+    }),
+  );
+  assert.throws(() =>
+    finance.assertProviderTransactionMatches(payment, {
+      reference: "pay-ref", amount: 2499, requested_amount: 2500,
+      currency: "NGN", customer: { email: "guardian@example.com" },
+    }),
+  );
+  assert.throws(() =>
+    finance.assertProviderTransactionMatches(payment, {
+      reference: "pay-ref",
+      amount: 2500,
+      currency: "USD",
       customer: { email: "guardian@example.com" },
     }),
   );
@@ -1169,11 +1928,10 @@ test("health responds and protected auth endpoints reject anonymous requests", a
   assert.equal(health.status, 200);
   const swagger = await fetch(`${base}/api-docs/swagger.json`);
   assert.equal(swagger.status, 200);
-  assert.equal(
+  assert.ok(
     ((await swagger.json()) as { paths: Record<string, unknown> }).paths[
       "/payments/webhook/paystack"
     ],
-    undefined,
   );
   const me = await fetch(`${base}/api/v1/auth/me`);
   assert.equal(me.status, 401);

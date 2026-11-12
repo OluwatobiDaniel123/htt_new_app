@@ -1,6 +1,7 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 
+/** @param {{icon?: import("lucide-react").LucideIcon, title: React.ReactNode, description?: React.ReactNode, action?: React.ReactNode, className?: string}} props */
 export default function EmptyState({ icon: Icon, title, description, action, className }) {
   return (
     <div className={cn('flex flex-col items-center justify-center px-6 py-14 text-center', className)}>

@@ -31,6 +31,7 @@ import { analyticsRoutes } from "./routes/analyticsRoutes.js";
 import { auditRoutes } from "./routes/auditRoutes.js";
 import { publicIntakeRoutes } from "./routes/publicIntakeRoutes.js";
 import { coachingApprenticeRoutes } from "./routes/coachingApprenticeRoutes.js";
+import { paymentRoutes } from "./routes/paymentRoutes.js";
 
 export const app = express();
 const require = createRequire(import.meta.url);
@@ -94,15 +95,7 @@ app.use("/api/v1/players/:id/guardians", playerGuardianRoutes);
 app.use("/api/v1/registrations", registrationRoutes);
 app.use("/api/v1/centres", centreRoutes);
 app.use("/api/v1/programmes", programmeRoutes);
-app.use("/api/v1/payments", (_req, res) =>
-  res.status(503).json({
-    success: false,
-    error: {
-      code: "FEATURE_DISABLED",
-      message: "Payment processing is temporarily unavailable.",
-    },
-  }),
-);
+app.use("/api/v1/payments", paymentRoutes);
 app.use("/api/v1/notifications", notificationRoutes);
 app.use("/api/v1/admin/notifications", notificationAdminRoutes);
 app.use("/api/v1", adminResourceRoutes);

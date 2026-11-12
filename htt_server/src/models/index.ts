@@ -39,6 +39,7 @@ const {
   Registration,
   RegistrationDocument,
   RegistrationStatusHistory,
+  EmergencyContact,
   AttendanceSession,
   AttendanceRecord,
   Assessment,
@@ -208,6 +209,10 @@ Registration.hasMany(RegistrationStatusHistory, {
   foreignKey: "registrationId",
   as: "statusHistory",
 });
+Registration.hasOne(EmergencyContact, { foreignKey: "registrationId", as: "emergencyContact" });
+EmergencyContact.belongsTo(Registration, { foreignKey: "registrationId", as: "registration" });
+Player.hasMany(EmergencyContact, { foreignKey: "playerId", as: "emergencyContacts" });
+EmergencyContact.belongsTo(Player, { foreignKey: "playerId", as: "player" });
 RegistrationDocument.belongsTo(MediaAsset, {
   foreignKey: "mediaAssetId",
   as: "asset",
@@ -291,6 +296,7 @@ Payment.belongsTo(Registration, {
   foreignKey: "registrationId",
   as: "registration",
 });
+Registration.hasMany(Payment, { foreignKey: "registrationId", as: "paymentRecords" });
 Payment.belongsTo(Guardian, { foreignKey: "guardianId", as: "guardian" });
 Payment.belongsTo(Programme, { foreignKey: "programmeId", as: "programme" });
 Payment.belongsTo(Centre, { foreignKey: "centreId", as: "centre" });

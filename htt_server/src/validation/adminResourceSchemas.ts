@@ -98,7 +98,14 @@ export const resourceQuerySchema = z.object({
 export const resourceParamsSchema = z.object({ id: z.string().uuid() });
 
 export const attendanceMarksBody = z.object({
-  records: z.array(z.object({ playerId: uuid, status: z.enum(["present", "absent", "late", "excused"]), notes: text() }).strict()).min(1).max(300),
+  records: z.array(z.object({ playerId: uuid, status: z.enum(["present", "absent", "late", "excused"]), notes: text() }).strict()).min(1).max(300)
+    .superRefine((records, context) => {
+      const ids = new Set<string>();
+      records.forEach((record, index) => {
+        if (ids.has(record.playerId)) context.addIssue({ code: z.ZodIssueCode.custom, path: [index, "playerId"], message: "A player may only appear once in an attendance submission." });
+        ids.add(record.playerId);
+      });
+    }),
 }).strict();
 
 export const scholarshipApprovalBody = z.object({

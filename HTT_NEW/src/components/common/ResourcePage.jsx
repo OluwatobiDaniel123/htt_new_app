@@ -12,6 +12,24 @@ import AccessDenied from '@/components/common/AccessDenied';
 import ListToolbar, { SearchInput } from '@/components/common/ListToolbar';
 import { AddButton, FilterSelect, TableFooter } from '@/components/common/TableBits';
 
+/**
+ * @typedef {{name: string, label: string, [key: string]: unknown}} ResourceFormField
+ * @typedef {{key: string, header: React.ReactNode, width?: number, className?: string, render?: (row: Record<string, unknown>) => React.ReactNode}} ResourceColumn
+ * @typedef {{key: string, label: string, options: Array<{value: string, label: string}>, className?: string}} ResourceFilter
+ * @param {{
+ *   moduleKey: string, title: string, description?: React.ReactNode, entityLabel?: string,
+ *   entity: string, fields?: ResourceFormField[], editFields?: ResourceFormField[], columns?: ResourceColumn[],
+ *   searchFields?: string[], searchPlaceholder?: string, filters?: ResourceFilter[],
+ *   defaultQuery?: Record<string, unknown>, defaultValues?: Record<string, unknown>, sort?: string,
+ *   createLabel?: string, emptyTitle?: string, emptyDescription?: string,
+ *   emptyIcon?: import("lucide-react").LucideIcon,
+ *   rowTo?: (row: Record<string, unknown>) => string,
+ *   rowActions?: (row: Record<string, unknown>) => React.ReactNode,
+ *   allowDelete?: boolean, allowCreate?: boolean,
+ *   transform?: (values: Record<string, unknown>, editing: Record<string, unknown> | null) => Record<string, unknown> | Promise<Record<string, unknown>>,
+ *   headerActions?: React.ReactNode, aboveTable?: React.ReactNode, permissionLevel?: string
+ * }} props
+ */
 export default function ResourcePage({
   moduleKey,
   title,
@@ -56,6 +74,7 @@ export default function ResourcePage({
   }, [search]);
 
   const query = useMemo(() => {
+    /** @type {Record<string, unknown>} */
     const q = { ...defaultQuery };
     Object.entries(filterValues).forEach(([k, v]) => {
       if (v) q[k] = v;

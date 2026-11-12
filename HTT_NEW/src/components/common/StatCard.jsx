@@ -11,6 +11,7 @@ const TONES = {
   rose: 'bg-rose-50 text-rose-700',
 };
 
+/** @param {{label: React.ReactNode, value: React.ReactNode, hint: React.ReactNode, icon?: import("lucide-react").LucideIcon, tone?: string, to?: string, loading?: boolean}} props */
 export default function StatCard({ label, value, hint, icon: Icon, tone = 'green', to, loading }) {
   const inner = (
     <>

@@ -2,6 +2,21 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import EmptyState from '@/components/common/EmptyState';
 
+const displayCellValue = (value) => {
+  if (Array.isArray(value)) return value.map(displayCellValue);
+  if (
+    React.isValidElement(value) ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) return value;
+  return value === null || value === undefined ? '—' : null;
+};
+
+/**
+ * @template {Record<string, unknown>} Row
+ * @param {{columns: Array<{key: string, header: React.ReactNode, width?: number, className?: string, render?: (row: Row) => React.ReactNode}>, rows?: Row[], loading: boolean, emptyTitle?: React.ReactNode, emptyDescription?: React.ReactNode, emptyIcon?: import("lucide-react").LucideIcon, emptyAction?: React.ReactNode, onRowClick?: (row: Row) => void, rowTo?: (row: Row) => string, footer?: React.ReactNode}} props
+ */
 export default function DataTable({
   columns,
   rows = [],
@@ -54,7 +69,7 @@ export default function DataTable({
                 ))
               : rows.map((row) => (
                   <tr
-                    key={row.id}
+                    key={String(row.id)}
                     onClick={clickable ? () => handleRow(row) : undefined}
                     className={`border-b border-border/50 last:border-0 transition-colors ${
                       clickable ? 'cursor-pointer hover:bg-muted/40' : ''
@@ -65,7 +80,7 @@ export default function DataTable({
                         key={col.key}
                         className={`px-4 py-3 text-[13px] text-foreground/90 ${col.className || ''}`}
                       >
-                        {col.render ? col.render(row) : row[col.key] ?? '—'}
+                        {col.render ? col.render(row) : displayCellValue(row[col.key])}
                       </td>
                     ))}
                   </tr>

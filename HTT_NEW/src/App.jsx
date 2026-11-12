@@ -6,6 +6,7 @@ import {
   Route,
   Routes,
   Navigate,
+  useLocation,
 } from "react-router-dom";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AppShell from "@/components/layout/AppShell";
@@ -52,10 +53,14 @@ import Reports from "@/pages/Reports";
 import AuditLogs from "@/pages/AuditLogs";
 import Safeguarding from "@/pages/Safeguarding";
 import Settings from "@/pages/Settings";
+import PaymentCallback from "@/pages/PaymentCallback";
 
 const AuthenticatedApp = () => {
+  const { pathname } = useLocation();
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } =
     useAuth();
+
+  if (pathname === "/payment/callback") return <PaymentCallback />;
 
   // Show loading spinner while checking app public settings or auth
   if (isLoadingPublicSettings || isLoadingAuth) {

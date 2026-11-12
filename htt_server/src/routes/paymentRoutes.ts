@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { rateLimit } from "express-rate-limit";
 import {
   authenticate,
   requirePermission,
@@ -16,7 +17,25 @@ import {
 } from "../validation/paymentSchemas.js";
 
 export const paymentRoutes = Router();
-paymentRoutes.post("/webhook/paystack", payments.webhook);
+// Express's default proxy trust is disabled; these limits use req.ip as supplied
+// by the socket unless the deployment explicitly configures a trusted proxy.
+export const paystackWebhookLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 600,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+});
+export const paymentVerificationLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 12,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+});
+paymentRoutes.post("/webhook/paystack", paystackWebhookLimiter, payments.webhook);
+// The hosted checkout returns to a public callback, which must be able to ask
+// the server to verify the opaque Paystack reference. The reference is only a
+// lookup key; payment status is always established by the server-side request.
+paymentRoutes.post("/verify/:reference", paymentVerificationLimiter, payments.verify);
 paymentRoutes.use(authenticate);
 paymentRoutes.get(
   "/",
@@ -29,11 +48,6 @@ paymentRoutes.post(
   requirePermission("payments.initialize", "full"),
   validateBody(initializePaymentBody),
   payments.initialize,
-);
-paymentRoutes.post(
-  "/verify/:reference",
-  requirePermission("payments.verify", "full"),
-  payments.verify,
 );
 paymentRoutes.post(
   "/manual",

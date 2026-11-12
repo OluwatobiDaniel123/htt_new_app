@@ -6,10 +6,12 @@ import useCollection from "@/hooks/useCollection";
 import { ageFromDob, formatDate, initials, labelize } from "@/lib/constants";
 
 const REGISTRATION_STATUS = {
+  pending: { label: "Pending approval", tone: "amber" },
   prospective: { label: "Prospective", tone: "amber" },
   registered: { label: "Registered", tone: "green" },
   waitlisted: { label: "Waitlisted", tone: "gold" },
   archived: { label: "Archived", tone: "navy" },
+  rejected: { label: "Rejected", tone: "red" },
 };
 
 const SCHOLARSHIP_STATUS = {

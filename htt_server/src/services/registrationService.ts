@@ -4,6 +4,8 @@ import { AppError } from "../errors/AppError.js";
 import { models, sequelize } from "../models/index.js";
 import { writeAudit } from "./auditService.js";
 import { enqueueNotificationEvent } from "./notificationService.js";
+import { moneyMinor } from "./paymentService.js";
+import { signedRegistrationImageUrl } from "./mediaService.js";
 import {
   ageGroupFor,
   ageOnDate,
@@ -84,16 +86,22 @@ const registrationIncludes = [
   {
     model: models.Player.unscoped(),
     as: "player",
-    attributes: ["id", "playerCode", "fullName", "dateOfBirth", "ageGroup"],
+    attributes: ["id", "playerCode", "officialPlayerId", "fullName", "dateOfBirth", "ageGroup", "gender", "school", "className", "positionUuid", "registrationStatus"],
   },
   {
     model: models.Guardian.unscoped(),
     as: "guardian",
-    attributes: ["id", "fullName", "email", "phone"],
+    attributes: ["id", "fullName", "email", "phone", "alternativePhone"],
   },
 ];
 const registrationDetailIncludes = [
   ...registrationIncludes,
+  {
+    model: models.EmergencyContact,
+    as: "emergencyContact",
+    attributes: ["id", "fullName", "phone"],
+    required: false,
+  },
   {
     model: models.RegistrationDocument,
     as: "documents",
@@ -108,6 +116,12 @@ const registrationDetailIncludes = [
     ],
   },
   {
+    model: models.Payment,
+    as: "paymentRecords",
+    attributes: ["id", "reference", "amount", "currency", "status", "providerStatus", "verifiedAt", "verifiedAmount", "verifiedCurrency", "paidAt", "expiresAt", "createdAt"],
+    required: false,
+  },
+  {
     model: models.RegistrationStatusHistory,
     as: "statusHistory",
     attributes: ["id", "status", "note", "actorId", "createdAt"],
@@ -120,8 +134,15 @@ const fullPersonalFields = [
   "guardianAddress",
   "childName",
   "childDateOfBirth",
+  "childGender", "childSchool", "childClassName", "childPositionUuid",
+  "guardianRelationship", "guardianAlternativePhone", "emergencyContactName", "emergencyContactPhone",
   "internalNotes",
 ];
+const registrationFieldAccess = (field: string, access: { playerData: boolean; guardianData: boolean; internal?: boolean }) => {
+  if (field.startsWith("child")) return access.playerData;
+  if (field.startsWith("guardian") || field.startsWith("emergency")) return access.guardianData;
+  return access.internal === true;
+};
 const serializeRegistration = (
   row: any,
   canSeePlayer: boolean,
@@ -137,14 +158,22 @@ const serializeRegistration = (
   if (!canSeePlayer) {
     json.childName = undefined;
     json.childDateOfBirth = undefined;
+    for (const field of ["childGender", "childSchool", "childClassName", "childPositionUuid"]) json[field] = undefined;
+    if (json.player) for (const field of ["fullName", "dateOfBirth", "gender", "school", "className", "positionUuid"]) json.player[field] = undefined;
   }
   if (!canSeeGuardian) {
     json.guardianName = undefined;
     json.guardianEmail = undefined;
     json.guardianPhone = undefined;
     json.guardianAddress = undefined;
+    json.guardianRelationship = undefined;
+    json.guardianAlternativePhone = undefined;
+    json.emergencyContactName = undefined;
+    json.emergencyContactPhone = undefined;
   }
   if (!canSeeInternal) json.internalNotes = undefined;
+  if (!canSeeInternal) json.publicPayload = undefined;
+  delete json.submissionFingerprint;
   if (!canSeeInternal) json.documents = undefined;
   if (!canSeeInternal && Array.isArray(json.statusHistory))
     json.statusHistory = json.statusHistory.map(
@@ -158,7 +187,9 @@ const serializeRegistration = (
     json.guardian.fullName = undefined;
     json.guardian.email = undefined;
     json.guardian.phone = undefined;
+    json.guardian.alternativePhone = undefined;
   }
+  if (json.emergencyContact && !canSeeGuardian) json.emergencyContact = undefined;
   return json;
 };
 const assertOperationalSelections = async (
@@ -259,6 +290,22 @@ const lockPotentialDuplicate = async (row: any, transaction: Transaction) => {
   });
 };
 
+export const approvalYearInLagos = (date = new Date()) => Number(new Intl.DateTimeFormat("en", { timeZone: "Africa/Lagos", year: "numeric" }).format(date));
+export const formatOfficialPlayerId = (year: number, sequence: number) => `HTT-${year}-${String(sequence).padStart(6, "0")}`;
+
+const allocateOfficialPlayerId = async (transaction: Transaction) => {
+  const year = approvalYearInLagos();
+  await sequelize.query(
+    "INSERT INTO player_id_counters (approval_year, last_sequence) VALUES (:year, 0) ON CONFLICT (approval_year) DO NOTHING",
+    { replacements: { year }, transaction },
+  );
+  const counter = await models.PlayerIdCounter.findOne({ where: { approvalYear: year }, transaction, lock: transaction.LOCK.UPDATE }) as any;
+  if (!counter) throw new AppError(500, "PLAYER_ID_COUNTER_FAILED", "Player ID sequence could not be allocated.");
+  const sequence = Number(counter.lastSequence) + 1;
+  await counter.update({ lastSequence: sequence }, { transaction });
+  return formatOfficialPlayerId(year, sequence);
+};
+
 export const listRegistrations = async (
   query: Record<string, unknown>,
   access: { playerData: boolean; guardianData: boolean; internal: boolean },
@@ -280,16 +327,7 @@ export const listRegistrations = async (
         : []),
     ];
   }
-  const attributes = fullPersonalFields.filter((field) =>
-    field === "guardianName" ||
-    field === "guardianEmail" ||
-    field === "guardianPhone" ||
-    field === "guardianAddress"
-      ? access.guardianData
-      : field === "childName" || field === "childDateOfBirth"
-        ? access.playerData
-        : access.internal,
-  );
+  const attributes = fullPersonalFields.filter((field) => registrationFieldAccess(field, access));
   const result = await models.Registration.unscoped().findAndCountAll({
     where: whereClause,
     attributes: [
@@ -305,6 +343,7 @@ export const listRegistrations = async (
       "consentMedical",
       "paymentStatus",
       "amountDue",
+      "amountDueCurrency",
       "paymentReference",
       "assignedReviewerId",
       "submittedAt",
@@ -313,6 +352,8 @@ export const listRegistrations = async (
       "source",
       "linkedPlayerId",
       "guardianId",
+      "centreNameSnapshot", "programmeTitleSnapshot", "programmeBaseFeeSubmitted", "paymentFrequency", "paymentFeeSubmitted",
+      "profileImageAssetId",
       "createdAt",
       "updatedAt",
       ...attributes,
@@ -342,18 +383,7 @@ export const getRegistration = async (
   id: string,
   access: { playerData: boolean; guardianData: boolean; internal?: boolean },
 ) => {
-  const attributes = fullPersonalFields.filter((field) =>
-    [
-      "guardianName",
-      "guardianEmail",
-      "guardianPhone",
-      "guardianAddress",
-    ].includes(field)
-      ? access.guardianData
-      : ["childName", "childDateOfBirth"].includes(field)
-        ? access.playerData
-        : access.internal === true,
-  );
+  const attributes = fullPersonalFields.filter((field) => registrationFieldAccess(field, access));
   const row = (await models.Registration.unscoped().findByPk(id, {
     attributes: [
       "id",
@@ -368,6 +398,7 @@ export const getRegistration = async (
       "consentMedical",
       "paymentStatus",
       "amountDue",
+      "amountDueCurrency",
       "paymentReference",
       "assignedReviewerId",
       "submittedAt",
@@ -376,6 +407,8 @@ export const getRegistration = async (
       "source",
       "linkedPlayerId",
       "guardianId",
+      "centreNameSnapshot", "programmeTitleSnapshot", "programmeBaseFeeSubmitted", "paymentFrequency", "paymentFeeSubmitted",
+      "profileImageAssetId",
       "createdAt",
       "updatedAt",
       ...attributes,
@@ -391,11 +424,20 @@ export const getRegistration = async (
   );
 };
 
+export const getRegistrationProfileImageUrl = async (id: string) => {
+  const registration = await models.Registration.unscoped().findByPk(id, { attributes: ["id", "profileImageAssetId"] }) as any;
+  if (!registration?.profileImageAssetId) throw new AppError(404, "PROFILE_IMAGE_NOT_FOUND", "The profile image is unavailable.");
+  const asset = await models.MediaAsset.findByPk(registration.profileImageAssetId, { attributes: ["providerAssetId", "secureUrl", "access"] }) as any;
+  if (!asset || asset.access !== "private") throw new AppError(404, "PROFILE_IMAGE_NOT_FOUND", "The profile image is unavailable.");
+  return signedRegistrationImageUrl(asset.secureUrl, asset.providerAssetId);
+};
+
 export const createRegistration = async (
   input: any,
   actorId: string | null,
   ip?: string,
   source = "admin",
+  submissionFingerprint?: string,
 ) => {
   if (
     input.childDateOfBirth &&
@@ -419,6 +461,12 @@ export const createRegistration = async (
           lock: transaction.LOCK.UPDATE,
         })) as any)
       : null;
+    if (source === "public_website") {
+      if (!programme || moneyMinor(programme.approvedFee ?? 0) <= 0n)
+        throw new AppError(409, "PAYMENT_AMOUNT_NOT_CONFIGURED", "A positive programme fee must be configured before public registration.");
+      if (String(programme.currency || "NGN").trim().toUpperCase() !== "NGN")
+        throw new AppError(409, "PAYMENT_CURRENCY_UNSUPPORTED", "Public registration payments currently support NGN only.");
+    }
     if (input.assignedReviewerId) {
       const reviewer = await models.StaffAccount.findOne({
         where: {
@@ -458,8 +506,10 @@ export const createRegistration = async (
         consentMedical: input.consentMedical ?? false,
         paymentStatus: "unpaid",
         amountDue: programme?.approvedFee ?? 0,
+        amountDueCurrency: programme?.currency ?? "NGN",
         status,
         source,
+        ...(submissionFingerprint ? { submissionFingerprint } : {}),
         submittedAt: new Date(),
         internalNotes: input.internalNotes ?? null,
         assignedReviewerId: input.assignedReviewerId ?? null,
@@ -554,6 +604,7 @@ export const updateRegistration = async (
           })) as any)
         : null;
       updates.amountDue = programme?.approvedFee ?? 0;
+      updates.amountDueCurrency = programme?.currency ?? "NGN";
     }
     await row.update(updates, { transaction });
     await writeAudit({
@@ -677,6 +728,11 @@ export const transitionRegistration = async (
       },
       { transaction },
     );
+    if (nextStatus === "rejected" && row.linkedPlayerId) {
+      const pendingPlayer = await models.Player.unscoped().findByPk(row.linkedPlayerId, { transaction, lock: transaction.LOCK.UPDATE }) as any;
+      if (pendingPlayer && pendingPlayer.registrationStatus === "pending")
+        await pendingPlayer.update({ registrationStatus: "rejected" }, { transaction });
+    }
     await models.RegistrationStatusHistory.create(
       { registrationId: id, status: nextStatus, note: note ?? null, actorId },
       { transaction },
@@ -710,12 +766,15 @@ const attachGuardian = async (
         phone: row.guardianPhone.trim(),
         email: row.guardianEmail?.trim().toLowerCase() ?? null,
         address: row.guardianAddress ?? null,
+        alternativePhone: row.guardianAlternativePhone ?? null,
         preferredContact: "phone",
         accountStatus: "active",
         consentStatus: row.consentData ? "granted" : "pending",
       },
       { transaction },
     );
+  } else if (!guardian.alternativePhone && row.guardianAlternativePhone) {
+    await guardian.update({ alternativePhone: row.guardianAlternativePhone }, { transaction });
   }
   row.guardianId = guardian.id;
   await row.save({ transaction });
@@ -729,7 +788,7 @@ const attachGuardian = async (
   })) as any;
   if (existing)
     await existing.update(
-      { relationship: "guardian", isPrimary: true, isEmergencyContact: true },
+      { relationship: row.guardianRelationship || "guardian", isPrimary: true, isEmergencyContact: false },
       { transaction },
     );
   else
@@ -737,9 +796,9 @@ const attachGuardian = async (
       {
         playerId: player.id,
         guardianId: guardian.id,
-        relationship: "guardian",
+        relationship: row.guardianRelationship || "guardian",
         isPrimary: true,
-        isEmergencyContact: true,
+        isEmergencyContact: false,
       },
       { transaction },
     );
@@ -769,9 +828,10 @@ export const approveRegistration = async (
       lock: transaction.LOCK.UPDATE,
     })) as any;
     if (!row) throw new AppError(404, "NOT_FOUND", "Registration not found.");
-    if (row.linkedPlayerId)
+    if (row.status === "approved" && row.linkedPlayerId)
       return {
         playerId: row.linkedPlayerId,
+        officialPlayerId: ((await models.Player.unscoped().findByPk(row.linkedPlayerId, { transaction })) as any)?.officialPlayerId ?? null,
         created: false,
         alreadyApproved: true,
       };
@@ -782,6 +842,16 @@ export const approveRegistration = async (
         `Registration cannot be approved from ${row.status}.`,
       );
     requiredRegistrationFields(row);
+    const due = moneyMinor(row.amountDue ?? 0);
+    if (due <= 0n) throw new AppError(409, "PAYMENT_AMOUNT_NOT_CONFIGURED", "A positive registration charge must be configured before approval.");
+    const verifiedPayments = await models.Payment.findAll({
+      where: { registrationId: id, status: { [Op.in]: ["successful", "partially_refunded"] } },
+      attributes: ["amount", "currency", "refundAmount"], transaction, lock: transaction.LOCK.UPDATE,
+    }) as any[];
+    const currencyMismatch = verifiedPayments.some((payment) => String(payment.currency).trim().toUpperCase() !== String(row.amountDueCurrency || "NGN").trim().toUpperCase());
+    if (currencyMismatch) throw new AppError(409, "PAYMENT_CURRENCY_MISMATCH", "Confirmed payments are not in the registration charge currency.");
+    const amountPaid = verifiedPayments.reduce((sum, payment) => sum + moneyMinor(payment.amount) - moneyMinor(payment.refundAmount ?? 0), 0n);
+    if (amountPaid < due) throw new AppError(409, "PAYMENT_NOT_CONFIRMED", "Confirmed payments do not cover the registration charge.");
     await assertOperationalSelections(
       row.centreId,
       row.programmeId,
@@ -812,7 +882,10 @@ export const approveRegistration = async (
     const candidates = (await playerCandidates(row, transaction)) as any[];
     let player: any;
     let created = false;
-    if (input.existingPlayerId) {
+    if (row.linkedPlayerId) {
+      player = await models.Player.unscoped().findByPk(row.linkedPlayerId, { transaction, lock: transaction.LOCK.UPDATE }) as any;
+      if (!player) throw new AppError(409, "LINKED_PLAYER_MISSING", "The linked pending player record could not be found.");
+    } else if (input.existingPlayerId) {
       player = candidates.find(
         (candidate) => candidate.id === input.existingPlayerId,
       );
@@ -845,6 +918,7 @@ export const approveRegistration = async (
       player = (await models.Player.unscoped().create(
         {
           playerCode: await generateAcademyCode("player", transaction),
+          officialPlayerId: null,
           fullName: row.childName.trim(),
           dateOfBirth: row.childDateOfBirth,
           ageGroup:
@@ -856,6 +930,11 @@ export const approveRegistration = async (
             row.pathway === "scholarship_assessment" ? "applicant" : "none",
           documentVerification:
             row.documentStatus === "verified" ? "verified" : "pending",
+          school: row.childSchool ?? null,
+          gender: row.childGender ?? null,
+          className: row.childClassName ?? null,
+          positionUuid: row.childPositionUuid ?? null,
+          profileImageAssetId: row.profileImageAssetId ?? null,
           matchAppearances: 0,
           archived: false,
           registrationId: id,
@@ -865,17 +944,20 @@ export const approveRegistration = async (
       created = true;
     }
     if (
-      !player.registrationStatus ||
-      ["prospective", "waitlisted"].includes(player.registrationStatus)
+      player.registrationStatus !== "registered" ||
+      player.archived ||
+      player.archivedReason
     )
       await player.update(
-        { registrationStatus: "registered" },
+        { registrationStatus: "registered", archived: false, archivedReason: null },
         { transaction },
       );
     if (!player.centreId && row.centreId)
       await player.update({ centreId: row.centreId }, { transaction });
     if (!player.programmeId && row.programmeId)
       await player.update({ programmeId: row.programmeId }, { transaction });
+    if (!player.officialPlayerId)
+      await player.update({ officialPlayerId: await allocateOfficialPlayerId(transaction) }, { transaction });
     if (
       row.documentStatus === "verified" &&
       player.documentVerification === "pending"
@@ -886,6 +968,10 @@ export const approveRegistration = async (
       );
 
     const guardian = await attachGuardian(row, player, transaction, actorId);
+    const emergency = await models.EmergencyContact.findOne({ where: { registrationId: id }, transaction, lock: transaction.LOCK.UPDATE }) as any;
+    if (emergency) await emergency.update({ playerId: player.id }, { transaction });
+    else if (row.emergencyContactName && row.emergencyContactPhone)
+      await models.EmergencyContact.create({ registrationId: id, playerId: player.id, fullName: row.emergencyContactName, phone: row.emergencyContactPhone }, { transaction });
     const consentDate = new Date().toISOString().slice(0, 10);
     const consents: Array<[string, boolean]> = [
       ["media_photography", row.consentMedia],
@@ -949,6 +1035,7 @@ export const approveRegistration = async (
     return {
       playerId: player.id,
       playerCode: player.playerCode,
+      officialPlayerId: player.officialPlayerId,
       created,
       alreadyApproved: false,
     };

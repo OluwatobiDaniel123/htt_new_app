@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { Op, type Transaction } from "sequelize";
 import { env } from "../config/env.js";
 import { AppError } from "../errors/AppError.js";
@@ -111,9 +111,10 @@ const setRegistrationPaymentState = async (
       status: { [Op.in]: ["successful", "partially_refunded", "refunded"] },
     },
     transaction,
-    attributes: ["amount", "refundAmount"],
+    attributes: ["amount", "currency", "refundAmount"],
   })) as any[];
-  const paid = payments.reduce(
+  const matchingPayments = payments.filter((payment) => String(payment.currency).trim().toUpperCase() === String(registration.amountDueCurrency || "NGN").trim().toUpperCase());
+  const paid = matchingPayments.reduce(
     (sum, payment) =>
       sum + moneyMinor(payment.amount) - moneyMinor(payment.refundAmount ?? 0),
     0n,
@@ -165,12 +166,27 @@ const verifyProviderPayment = async (
       lock: transaction.LOCK.UPDATE,
     })) as any;
     locked.providerStatus = String(data.status ?? "unknown").slice(0, 40);
-    if (data.status === "success") await markSuccessful(locked.id, transaction);
+    locked.verifiedAt = new Date();
+    locked.verifiedAmount = fromMinor(BigInt(String(data.amount)));
+    locked.verifiedCurrency = String(data.currency ?? "").toUpperCase().slice(0, 3);
+    locked.providerTransactionId = data.id == null ? null : String(data.id).slice(0, 120);
+    locked.verificationDetails = {
+      status: String(data.status ?? "unknown").slice(0, 40),
+      reference: String(data.reference ?? "").slice(0, 160),
+      amount: String(data.amount ?? ""), currency: String(data.currency ?? "").slice(0, 3),
+      paidAt: data.paid_at ?? null, channel: data.channel ?? null,
+    };
+    if (data.status === "success") {
+      const successful = await markSuccessful(locked.id, transaction);
+      locked.status = successful.status;
+      locked.paidAt = successful.paidAt;
+      locked.receiptNumber = successful.receiptNumber;
+    }
     else if (
-      ["failed", "abandoned", "reversed"].includes(data.status) &&
+      ["failed", "abandoned", "reversed", "expired"].includes(data.status) &&
       locked.status === "pending"
     ) {
-      locked.status = data.status === "abandoned" ? "cancelled" : "failed";
+      locked.status = data.status === "abandoned" ? "cancelled" : data.status === "expired" ? "expired" : "failed";
       await enqueueNotificationEvent(
         "payment.failed",
         "payment",
@@ -205,7 +221,15 @@ export const assertProviderTransactionMatches = (payment: any, data: any) => {
       "REFERENCE_MISMATCH",
       "Payment reference could not be verified.",
     );
-  if (BigInt(String(data.amount)) !== moneyMinor(payment.amount))
+  const expectedAmount = moneyMinor(payment.amount);
+  const requestedAmount = data.requested_amount == null
+    ? null
+    : BigInt(String(data.requested_amount));
+  const chargedAmount = BigInt(String(data.amount));
+  if (
+    (requestedAmount !== null && requestedAmount !== expectedAmount) ||
+    chargedAmount < expectedAmount
+  )
     throw new AppError(
       409,
       "AMOUNT_MISMATCH",
@@ -253,7 +277,7 @@ export const balanceFor = (due: unknown, collected: unknown) => {
 
 export const initializePayment = async (
   input: any,
-  actorId: string,
+  actorId: string | null,
   ipAddress?: string,
 ) => {
   const prior = (await models.Payment.unscoped().findOne({
@@ -309,6 +333,9 @@ export const initializePayment = async (
           transaction,
         })) as any)
       : null;
+    const currency = String(registration.amountDueCurrency || programme?.currency || "NGN").trim().toUpperCase();
+    if (currency !== "NGN")
+      throw new AppError(409, "PAYMENT_CURRENCY_UNSUPPORTED", "Online registration payments currently support NGN only.");
     const due = moneyMinor(
       input.purpose === "programme_fee"
         ? (programme?.approvedFee ?? 0)
@@ -324,12 +351,18 @@ export const initializePayment = async (
         },
       },
       transaction,
-      attributes: ["amount", "refundAmount", "status"],
+      attributes: ["id", "amount", "refundAmount", "status", "expiresAt"],
     })) as any[];
+    for (const priorPayment of priorPayments) {
+      if (priorPayment.status === "pending" && priorPayment.expiresAt && new Date(priorPayment.expiresAt) <= new Date()) {
+        priorPayment.status = "expired";
+        await priorPayment.save({ transaction });
+      }
+    }
     const reserved = priorPayments.reduce(
       (sum, item) =>
         sum +
-        (item.status === "pending"
+        (item.status === "expired" ? 0n : item.status === "pending"
           ? moneyMinor(item.amount)
           : moneyMinor(item.amount) - moneyMinor(item.refundAmount ?? 0)),
       0n,
@@ -357,7 +390,7 @@ export const initializePayment = async (
         payerName: registration.guardianName,
         payerEmail: registration.guardianEmail,
         amount: fromMinor(amountMinor),
-        currency: "NGN",
+        currency,
         method: "paystack",
         purpose: input.purpose,
         status: "pending",
@@ -388,6 +421,7 @@ export const initializePayment = async (
       amount: amountMinor.toString(),
       currency: "NGN",
       reference: payment.gatewayReference,
+      callback_url: env.PAYSTACK_CALLBACK_URL,
       metadata: {
         payment_id: payment.id,
         payment_reference: payment.reference,
@@ -463,27 +497,117 @@ export const verifyPayment = async (
 
 export const verifyWebhookSignature = (
   rawBody: Buffer | undefined,
-  signature: string | undefined,
+  legacySignature: string | undefined,
+  paystackSignature?: string,
+  nowSeconds = Math.floor(Date.now() / 1000),
 ) => {
-  const secret = env.PAYSTACK_SECRET_KEY;
-  if (!rawBody || !signature || !secret) return false;
-  const expected = createHmac("sha512", secret).update(rawBody).digest();
-  let supplied: Buffer;
-  try {
-    supplied = Buffer.from(signature, "hex");
-  } catch {
-    return false;
+  if (!rawBody) return false;
+
+  if (legacySignature && env.PAYSTACK_SECRET_KEY && /^[0-9a-f]{128}$/i.test(legacySignature)) {
+    const expected = createHmac("sha512", env.PAYSTACK_SECRET_KEY).update(rawBody).digest();
+    const supplied = Buffer.from(legacySignature, "hex");
+    if (supplied.length === expected.length && timingSafeEqual(expected, supplied)) return true;
   }
-  return (
-    supplied.length === expected.length && timingSafeEqual(expected, supplied)
+
+  if (!paystackSignature || !env.PAYSTACK_WEBHOOK_SECRET) return false;
+  const fields = paystackSignature.split(",").map((field) => field.trim());
+  let timestamp: number | undefined;
+  const signatures: string[] = [];
+  for (const field of fields) {
+    const separator = field.indexOf("=");
+    if (separator <= 0) return false;
+    const key = field.slice(0, separator).trim();
+    const value = field.slice(separator + 1).trim();
+    if (key === "t") {
+      if (timestamp !== undefined || !/^\d{1,12}$/.test(value)) return false;
+      timestamp = Number(value);
+    } else if (key === "v1") {
+      const match = /^([A-Za-z0-9_-]+):([0-9a-f]{128})$/i.exec(value);
+      if (!match) return false;
+      signatures.push(match[2]!);
+    }
+  }
+  if (
+    timestamp === undefined ||
+    signatures.length === 0 ||
+    Math.abs(nowSeconds - timestamp) > 300
+  ) return false;
+
+  const expected = createHmac("sha512", env.PAYSTACK_WEBHOOK_SECRET)
+    .update(`${timestamp}.`)
+    .update(rawBody)
+    .digest();
+  let matched = false;
+  for (const signature of signatures) {
+    const supplied = Buffer.from(signature, "hex");
+    if (supplied.length === expected.length && timingSafeEqual(expected, supplied)) matched = true;
+  }
+  return matched;
+};
+
+const stableWebhookJson = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(stableWebhookJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b));
+    return `{${entries.map(([key, child]) => `${JSON.stringify(key)}:${stableWebhookJson(child)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+};
+
+export const paystackWebhookEventId = (event: any) => {
+  const eventType = typeof event?.event === "string" ? event.event.trim() : "";
+  if (!eventType) throw new AppError(400, "INVALID_WEBHOOK", "Webhook event is invalid.");
+  if (eventType === "ping") return "ping";
+  const data = event?.data;
+  if (!data || typeof data !== "object" || Array.isArray(data))
+    throw new AppError(400, "INVALID_WEBHOOK", "Webhook event data is invalid.");
+
+  const providerId = event?.id ?? (eventType.startsWith("refund.") ? data.refund_reference : data.id);
+  if (providerId !== undefined && providerId !== null && String(providerId).trim())
+    return `${eventType}:${String(providerId).trim()}`.slice(0, 200);
+
+  const hasReference = [data.reference, data.transaction_reference].some(
+    (value) => typeof value === "string" && value.trim().length > 0,
   );
+  const hasEventState = [data.status, data.amount, data.currency].some(
+    (value) => value !== undefined && value !== null && String(value).length > 0,
+  );
+  if (!hasReference || !hasEventState)
+    throw new AppError(400, "WEBHOOK_IDENTITY_MISSING", "Webhook event does not contain enough information for safe deduplication.");
+
+  const digest = createHash("sha256").update(stableWebhookJson(event)).digest("hex");
+  return `${eventType}:sha256:${digest}`;
+};
+
+export const matchPaystackRefund = (candidates: any[], data: any) => {
+  const suppliedReference = [data?.refund_reference]
+    .find((value) => typeof value === "string" && value.trim())?.trim();
+  if (suppliedReference) {
+    const matches = candidates.filter((refund) => {
+      const referenceMatches = [refund.reference, refund.gatewayReference, refund.providerRefundReference]
+        .some((value) => value && String(value) === suppliedReference);
+      const amountMatches = data?.amount == null || /^\d+$/.test(String(data.amount)) && moneyMinor(refund.amount) === BigInt(String(data.amount));
+      const currencyMatches = data?.currency == null || String(refund.currency).trim().toUpperCase() === String(data.currency).trim().toUpperCase();
+      return referenceMatches && amountMatches && currencyMatches;
+    });
+    return matches.length === 1 ? { refund: matches[0], ambiguous: false } : { refund: null, ambiguous: matches.length > 1 };
+  }
+  if (data?.amount == null || !/^\d+$/.test(String(data.amount)))
+    return { refund: null, ambiguous: candidates.length > 0 };
+  const amount = BigInt(String(data.amount));
+  const matches = candidates.filter((refund) =>
+    moneyMinor(refund.amount) === amount &&
+    (data?.currency == null || String(refund.currency).trim().toUpperCase() === String(data.currency).trim().toUpperCase()),
+  );
+  return matches.length === 1
+    ? { refund: matches[0], ambiguous: false }
+    : { refund: null, ambiguous: matches.length > 1 };
 };
 
 export const processPaystackWebhook = async (event: any) => {
-  const eventId = `${String(event?.event ?? "")}:${String(event?.data?.id ?? event?.data?.refund_reference ?? event?.data?.reference ?? event?.data?.transaction_reference ?? "")}:${String(event?.data?.status ?? "")}`;
   const eventType = String(event?.event ?? "");
-  if (!eventId || !eventType)
-    throw new AppError(400, "INVALID_WEBHOOK", "Webhook event is invalid.");
+  const eventId = paystackWebhookEventId(event);
+  if (eventType === "ping") return { received: true, duplicate: false };
   const reference = String(
     event?.data?.reference ?? event?.data?.transaction_reference ?? "",
   );
@@ -502,13 +626,26 @@ export const processPaystackWebhook = async (event: any) => {
         eventType,
         receivedAt: new Date(),
         processingStatus: "received",
-        payload: { event: eventType, reference },
+        payload: {
+          event: eventType,
+          reference,
+          providerRefundReference: event?.data?.refund_reference ?? null,
+          amount: event?.data?.amount == null ? null : String(event.data.amount),
+          currency: event?.data?.currency == null ? null : String(event.data.currency),
+        },
       },
       { transaction },
     )) as any;
     if (eventType === "charge.success" && payment?.status === "pending") {
       await verifyProviderPayment(payment);
-    } else if (eventType.startsWith("refund.") && payment) {
+    } else if (eventType === "charge.success" && !payment) {
+      record.processingStatus = "needs_reconciliation";
+      await writeAudit({ action: "payment.webhook_unmatched", entityName: "payment_event", recordId: record.id, transaction, details: "charge_success_payment_not_found" });
+    } else if (eventType.startsWith("refund.")) {
+      if (!payment) {
+        record.processingStatus = "needs_reconciliation";
+        await writeAudit({ action: "refund.webhook_unmatched", entityName: "payment_event", recordId: record.id, transaction, details: "refund_payment_not_found" });
+      } else {
       const candidates = (await models.Refund.findAll({
         where: {
           paymentId: payment.id,
@@ -518,12 +655,8 @@ export const processPaystackWebhook = async (event: any) => {
         lock: transaction.LOCK.UPDATE,
         order: [["createdAt", "ASC"]],
       })) as any[];
-      const eventAmount =
-        event?.data?.amount == null ? null : BigInt(String(event.data.amount));
-      const refund = candidates.find(
-        (candidate) =>
-          eventAmount === null || moneyMinor(candidate.amount) === eventAmount,
-      );
+      const match = matchPaystackRefund(candidates, event?.data);
+      const refund = match.refund;
       if (refund) {
         const statusMap: Record<string, string> = {
           "refund.pending": "pending",
@@ -551,9 +684,19 @@ export const processPaystackWebhook = async (event: any) => {
             refund.id,
             transaction,
           );
+      } else {
+        record.processingStatus = "needs_reconciliation";
+        await writeAudit({
+          action: "refund.webhook_unmatched",
+          entityName: "payment_event",
+          recordId: record.id,
+          transaction,
+          details: `${match.ambiguous ? "ambiguous_refund_event" : "unmatched_refund_event"}:${eventId}`,
+        });
+      }
       }
     }
-    record.processingStatus = "processed";
+    if (record.processingStatus === "received") record.processingStatus = "processed";
     await record.save({ transaction });
     await transaction.commit();
     return { received: true, duplicate: false };
@@ -991,10 +1134,12 @@ export const approveRefund = async (
   const result = await paystackRequest("/refund", {
     transaction: payment.gatewayReference ?? payment.reference,
     amount: moneyMinor(refund.amount).toString(),
+    reference: refund.reference,
     merchant_note: String(refund.reason).slice(0, 200),
   });
   refund.status = result.status === "processing" ? "processing" : "pending";
   refund.gatewayReference = result.id ? String(result.id) : null;
+  refund.providerRefundReference = result.refund_reference ?? result.reference ?? null;
   refund.metadata = { providerStatus: result.status ?? "pending" };
   await refund.save();
   return refund;
