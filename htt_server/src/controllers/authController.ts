@@ -277,8 +277,8 @@ export const forgotPassword: RequestHandler = asyncHandler(async (req, res) => {
       action: "auth.password_reset_requested",
       entityName: "staff_account",
       recordId: staff.id,
-      outcome: delivered ? "success" : "failure",
-      reason: delivered ? undefined : "email_delivery_unavailable",
+      outcome: delivered.delivered ? "success" : "failure",
+      reason: delivered.delivered ? undefined : delivered.reason,
       ipAddress: req.ip,
     });
   }

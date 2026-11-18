@@ -114,7 +114,16 @@ export default function Staff() {
       const payload = { email: values.email, fullName: values.full_name };
       if (canAssignRoles) payload.roleIds = roleIds;
       const result = await api.post('/staff', payload);
-      toast({ title: result.invitation === 'sent' ? "Invitation sent" : "Staff account created", description: result.invitation === 'sent' ? "They can activate their account using the invitation email." : "Email delivery is not configured; an administrator must complete the invitation setup." });
+      const invitationSent = result.invitation === 'sent';
+      const deliveryMessage = result.invitation === 'pending_email_configuration'
+        ? "The account was created, but Resend is not configured on the backend."
+        : "The account was created, but Resend could not deliver the invitation. Check the backend email configuration and Resend status.";
+      toast({
+        title: invitationSent ? "Invitation sent" : "Staff account created; invitation not delivered",
+        description: invitationSent
+          ? "They can activate their account using the invitation email."
+          : deliveryMessage,
+      });
       users.reload();
     } finally {
       setInviting(false);

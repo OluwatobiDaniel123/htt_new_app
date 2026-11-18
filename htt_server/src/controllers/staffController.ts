@@ -205,7 +205,12 @@ export const createStaff: RequestHandler = asyncHandler(async (req, res) => {
             include: roleIncludes,
           }),
         ),
-        invitation: delivered ? "sent" : "pending_email_configuration",
+        invitation: delivered.delivered
+          ? "sent"
+          : delivered.reason === "email_provider_not_configured"
+            ? "pending_email_configuration"
+            : "delivery_failed",
+        invitationDelivery: delivered,
       },
     });
 });
