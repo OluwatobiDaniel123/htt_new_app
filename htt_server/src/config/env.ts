@@ -157,4 +157,11 @@ if (parsed.data.NODE_ENV !== "production") {
   );
 }
 
-export const env = parsed.data;
+export const passwordResetRateLimitFor = (
+  nodeEnv: (typeof parsed.data.NODE_ENV),
+) => (nodeEnv === "development" ? 10 : 5);
+
+export const env = {
+  ...parsed.data,
+  PASSWORD_RESET_RATE_LIMIT: passwordResetRateLimitFor(parsed.data.NODE_ENV),
+};
